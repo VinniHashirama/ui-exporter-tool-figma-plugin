@@ -1,0 +1,461 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arvore.io/schemas/uiir/1.0.0/uiir.schema.json",
+  "title": "UIIR — UI Intermediate Representation",
+  "description": "Representação neutra de uma tela de UI. Única fronteira entre o plugin do Figma e o importador da Unity. Nenhum campo é específico de Figma ou de Unity.",
+  "type": "object",
+  "required": ["schemaVersion", "source", "canvas", "root"],
+  "additionalProperties": false,
+
+  "properties": {
+    "schemaVersion": {
+      "description": "Semver do schema. O importador recusa um MAJOR diferente do seu.",
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "source": { "$ref": "#/$defs/source" },
+    "canvas": { "$ref": "#/$defs/canvas" },
+    "tokens": { "$ref": "#/$defs/tokens" },
+    "assets": {
+      "description": "Imagens embarcadas no pacote. Referenciadas por assetId.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/asset" },
+      "default": []
+    },
+    "lint": {
+      "description": "Diagnósticos produzidos no export. Erros nunca chegam aqui — bloqueiam o export.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/diagnostic" },
+      "default": []
+    },
+    "root": { "$ref": "#/$defs/node" }
+  },
+
+  "$defs": {
+    "source": {
+      "description": "Procedência do export. Deliberadamente sem identidade de autor (nada de PII).",
+      "type": "object",
+      "required": ["fileKey", "fileName", "exportedAt", "pluginVersion"],
+      "additionalProperties": false,
+      "properties": {
+        "fileKey": { "type": "string", "minLength": 1 },
+        "fileName": { "type": "string" },
+        "pageName": { "type": "string" },
+        "exportedAt": { "type": "string", "format": "date-time" },
+        "pluginVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" }
+      }
+    },
+
+    "canvas": {
+      "description": "Tamanho do frame raiz em px de design. Vira CanvasScaler.referenceResolution.",
+      "type": "object",
+      "required": ["width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 },
+        "orientation": { "enum": ["portrait", "landscape"] }
+      }
+    },
+
+    "tokens": {
+      "description": "Design tokens da skin deste jogo. Informativo no MVP — o valor resolvido já vem inline em cada node; o token serve para diagnóstico e para o futuro theming.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "colors": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/color" }
+        },
+        "typography": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/typographyToken" }
+        },
+        "spacing": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        }
+      }
+    },
+
+    "typographyToken": {
+      "type": "object",
+      "required": ["family", "style", "size"],
+      "additionalProperties": false,
+      "properties": {
+        "family": { "type": "string" },
+        "style": { "type": "string" },
+        "size": { "type": "number", "exclusiveMinimum": 0 },
+        "lineHeight": { "$ref": "#/$defs/lineHeight" },
+        "letterSpacing": { "type": "number" }
+      }
+    },
+
+    "asset": {
+      "type": "object",
+      "required": ["id", "file", "scale", "width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/assetId" },
+        "file": {
+          "description": "Caminho relativo dentro do zip. Sempre começa com 'images/'. Nunca contém '..' nem path absoluto — o importador rejeita o pacote se contiver.",
+          "type": "string",
+          "pattern": "^images/[A-Za-z0-9._@-]+\\.png$"
+        },
+        "scale": {
+          "description": "Fator de export. 2 = @2x.",
+          "type": "number",
+          "enum": [1, 2, 3, 4]
+        },
+        "width": { "type": "integer", "exclusiveMinimum": 0 },
+        "height": { "type": "integer", "exclusiveMinimum": 0 },
+        "nineSlice": {
+          "description": "Bordas de 9-slice em px de design, ordem CSS [top, right, bottom, left]. Ausente = sprite simples. Sempre ausente no MVP (detecção automática é v0.2); só é preenchido quando o designer anota explicitamente.",
+          "$ref": "#/$defs/edges"
+        }
+      }
+    },
+
+    "node": {
+      "type": "object",
+      "required": ["id", "name", "kind", "rect"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Identidade estável do node na origem. É a chave de reconciliação do importador: o GameObject correspondente é reusado entre imports para preservar seu fileID e, com ele, os overrides do Prefab Variant do dev. Nunca reaproveitar ou reescrever este valor.",
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "description": "Nome já limpo das convenções (sem '@', '#img', ':loc.*'). Vira o nome do GameObject.",
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "description": "frame: container. group: agrupamento sem visual próprio. text: texto. image: bitmap/vetor achatado. instance: instância de componente do kit.",
+          "enum": ["frame", "group", "text", "image", "instance"]
+        },
+        "component": { "$ref": "#/$defs/componentRef" },
+        "rect": { "$ref": "#/$defs/rect" },
+        "rotation": {
+          "description": "Graus, sentido anti-horário. 0 na esmagadora maioria dos casos.",
+          "type": "number",
+          "default": 0
+        },
+        "opacity": { "type": "number", "minimum": 0, "maximum": 1, "default": 1 },
+        "visible": { "type": "boolean", "default": true },
+        "clip": {
+          "description": "Recorta os filhos. Vira RectMask2D.",
+          "type": "boolean",
+          "default": false
+        },
+        "constraints": { "$ref": "#/$defs/constraints" },
+        "layout": { "$ref": "#/$defs/layout" },
+        "layoutChild": { "$ref": "#/$defs/layoutChild" },
+        "fill": { "$ref": "#/$defs/fill" },
+        "stroke": { "$ref": "#/$defs/stroke" },
+        "cornerRadius": { "$ref": "#/$defs/corners" },
+        "text": { "$ref": "#/$defs/text" },
+        "bind": {
+          "description": "Chave de binding para código, vinda de uma layer nomeada '@Algo'. Deve ser um identificador C# válido e único na tela.",
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "children": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/node" },
+          "default": []
+        }
+      },
+
+      "allOf": [
+        {
+          "description": "kind 'text' exige o bloco text.",
+          "if": { "properties": { "kind": { "const": "text" } }, "required": ["kind"] },
+          "then": { "required": ["text"] }
+        },
+        {
+          "description": "kind 'instance' exige o bloco component.",
+          "if": { "properties": { "kind": { "const": "instance" } }, "required": ["kind"] },
+          "then": { "required": ["component"] }
+        },
+        {
+          "description": "kind 'image' exige um fill de imagem.",
+          "if": { "properties": { "kind": { "const": "image" } }, "required": ["kind"] },
+          "then": {
+            "required": ["fill"],
+            "properties": {
+              "fill": {
+                "required": ["assetId"],
+                "properties": { "type": { "const": "IMAGE" } }
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "componentRef": {
+      "description": "Referência ao componente canônico do kit. O importador resolve para o prefab cujo UIKitComponent.canonicalName casa com canonicalName.",
+      "type": "object",
+      "required": ["canonicalName"],
+      "additionalProperties": false,
+      "properties": {
+        "setKey": {
+          "description": "Chave do ComponentSet na origem. Estável a renomeações — use como identidade preferencial quando presente.",
+          "type": "string"
+        },
+        "canonicalName": {
+          "description": "Nome canônico, ex. 'Button/Primary'. Compartilhado entre todos os jogos; o prefab por trás dele é por jogo.",
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(/[A-Za-z][A-Za-z0-9]*)*$"
+        },
+        "properties": {
+          "description": "Propriedades e variantes da instância, ex. { State: 'Default', Size: 'M', label: 'Jogar' }. Valores booleanos e numéricos vêm tipados.",
+          "type": "object",
+          "additionalProperties": {
+            "type": ["string", "number", "boolean", "null"]
+          }
+        }
+      }
+    },
+
+    "rect": {
+      "description": "Caixa relativa ao pai, em px de design. Origem no canto SUPERIOR-esquerdo, Y crescendo para BAIXO (convenção de design). O importador inverte o eixo Y.",
+      "type": "object",
+      "required": ["x", "y", "width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number", "minimum": 0 },
+        "height": { "type": "number", "minimum": 0 }
+      }
+    },
+
+    "constraints": {
+      "description": "Como o node reage ao pai redimensionar. Só é aplicado quando o pai NÃO tem layout automático. MIN/MAX são relativos ao eixo de design: no vertical, MIN é o topo.",
+      "type": "object",
+      "required": ["horizontal", "vertical"],
+      "additionalProperties": false,
+      "properties": {
+        "horizontal": { "$ref": "#/$defs/constraintMode" },
+        "vertical": { "$ref": "#/$defs/constraintMode" }
+      }
+    },
+
+    "constraintMode": {
+      "enum": ["MIN", "CENTER", "MAX", "STRETCH", "SCALE"]
+    },
+
+    "layout": {
+      "description": "Layout automático do container. Presente = os filhos são posicionados pelo layout, não pelo próprio rect.",
+      "type": "object",
+      "required": ["mode", "padding", "spacing", "primaryAlign", "counterAlign", "sizing"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "enum": ["HORIZONTAL", "VERTICAL", "WRAP"] },
+        "padding": { "$ref": "#/$defs/edges" },
+        "spacing": { "type": "number" },
+        "primaryAlign": {
+          "description": "Alinhamento no eixo do layout. SPACE_BETWEEN não tem equivalente nativo em UGUI — o importador aproxima e reporta.",
+          "enum": ["MIN", "CENTER", "MAX", "SPACE_BETWEEN"]
+        },
+        "counterAlign": {
+          "description": "Alinhamento no eixo perpendicular. BASELINE é aproximado para MIN.",
+          "enum": ["MIN", "CENTER", "MAX", "BASELINE"]
+        },
+        "sizing": { "$ref": "#/$defs/sizing" },
+        "reverseZIndex": { "type": "boolean", "default": false }
+      }
+    },
+
+    "layoutChild": {
+      "description": "Como ESTE node se comporta dentro do layout automático do PAI. Presente só quando o pai tem layout.",
+      "type": "object",
+      "required": ["sizing"],
+      "additionalProperties": false,
+      "properties": {
+        "sizing": { "$ref": "#/$defs/sizing" },
+        "grow": {
+          "description": "0 = não cresce, 1 = absorve o espaço sobrando no eixo primário.",
+          "type": "number",
+          "minimum": 0,
+          "default": 0
+        }
+      }
+    },
+
+    "sizing": {
+      "description": "FIXED: tamanho literal. HUG: encolhe até o conteúdo. FILL: ocupa o disponível.",
+      "type": "object",
+      "required": ["horizontal", "vertical"],
+      "additionalProperties": false,
+      "properties": {
+        "horizontal": { "enum": ["FIXED", "HUG", "FILL"] },
+        "vertical": { "enum": ["FIXED", "HUG", "FILL"] }
+      }
+    },
+
+    "fill": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "description": "Só SOLID e IMAGE no MVP. Gradientes e efeitos devem ser achatados em PNG pelo designer via a convenção '#img'.",
+          "enum": ["SOLID", "IMAGE"]
+        },
+        "color": { "$ref": "#/$defs/color" },
+        "assetId": { "$ref": "#/$defs/assetId" },
+        "scaleMode": {
+          "description": "Como a imagem preenche a caixa.",
+          "enum": ["FILL", "FIT", "STRETCH", "TILE"],
+          "default": "FIT"
+        },
+        "token": { "$ref": "#/$defs/tokenRef" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "SOLID" } }, "required": ["type"] },
+          "then": { "required": ["color"] }
+        },
+        {
+          "if": { "properties": { "type": { "const": "IMAGE" } }, "required": ["type"] },
+          "then": { "required": ["assetId"] }
+        }
+      ]
+    },
+
+    "stroke": {
+      "type": "object",
+      "required": ["color", "weight"],
+      "additionalProperties": false,
+      "properties": {
+        "color": { "$ref": "#/$defs/color" },
+        "weight": { "type": "number", "minimum": 0 },
+        "align": { "enum": ["INSIDE", "OUTSIDE", "CENTER"], "default": "INSIDE" },
+        "token": { "$ref": "#/$defs/tokenRef" }
+      }
+    },
+
+    "text": {
+      "type": "object",
+      "required": ["characters", "font", "size", "alignHorizontal", "alignVertical", "color"],
+      "additionalProperties": false,
+      "properties": {
+        "characters": { "type": "string" },
+        "font": {
+          "type": "object",
+          "required": ["family", "style"],
+          "additionalProperties": false,
+          "properties": {
+            "family": { "type": "string", "minLength": 1 },
+            "style": {
+              "description": "Nome do estilo como a origem o expõe, ex. 'Bold', 'SemiBold Italic'.",
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "size": { "type": "number", "exclusiveMinimum": 0 },
+        "lineHeight": { "$ref": "#/$defs/lineHeight" },
+        "letterSpacing": {
+          "description": "Em px de design quando unit=PIXELS; em % do em quando PERCENT.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["unit", "value"],
+          "properties": {
+            "unit": { "enum": ["PIXELS", "PERCENT"] },
+            "value": { "type": "number" }
+          }
+        },
+        "alignHorizontal": { "enum": ["LEFT", "CENTER", "RIGHT", "JUSTIFIED"] },
+        "alignVertical": { "enum": ["TOP", "CENTER", "BOTTOM"] },
+        "autoResize": {
+          "description": "NONE: caixa fixa. HEIGHT: cresce em altura. WIDTH_AND_HEIGHT: cresce nos dois eixos.",
+          "enum": ["NONE", "HEIGHT", "WIDTH_AND_HEIGHT"],
+          "default": "NONE"
+        },
+        "color": { "$ref": "#/$defs/color" },
+        "maxLines": { "type": "integer", "minimum": 1 },
+        "truncation": { "enum": ["DISABLED", "ELLIPSIS"], "default": "DISABLED" },
+        "case": { "enum": ["ORIGINAL", "UPPER", "LOWER", "TITLE"], "default": "ORIGINAL" },
+        "decoration": { "enum": ["NONE", "UNDERLINE", "STRIKETHROUGH"], "default": "NONE" },
+        "token": { "$ref": "#/$defs/tokenRef" },
+        "locKey": {
+          "description": "Chave de localização vinda da convenção 'nome:loc.alguma.chave'. No MVP é só registrada — não há sistema de localização ligado.",
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z0-9_.-]+$"
+        }
+      }
+    },
+
+    "lineHeight": {
+      "type": "object",
+      "required": ["unit"],
+      "additionalProperties": false,
+      "properties": {
+        "unit": {
+          "description": "AUTO = métrica default da fonte; nesse caso 'value' é ausente.",
+          "enum": ["PIXELS", "PERCENT", "AUTO"]
+        },
+        "value": { "type": "number", "minimum": 0 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "unit": { "enum": ["PIXELS", "PERCENT"] } },
+            "required": ["unit"]
+          },
+          "then": { "required": ["value"] }
+        }
+      ]
+    },
+
+    "diagnostic": {
+      "type": "object",
+      "required": ["severity", "rule", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "severity": { "enum": ["error", "warning", "info"] },
+        "rule": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "message": { "type": "string" },
+        "nodeId": { "type": "string" },
+        "nodeName": { "type": "string" }
+      }
+    },
+
+    "color": {
+      "description": "Hex RGB ou RGBA, sempre com '#'. Espaço sRGB.",
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$"
+    },
+
+    "assetId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+
+    "tokenRef": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+
+    "edges": {
+      "description": "Quatro arestas em ordem CSS: [top, right, bottom, left].",
+      "type": "array",
+      "items": { "type": "number", "minimum": 0 },
+      "minItems": 4,
+      "maxItems": 4
+    },
+
+    "corners": {
+      "description": "Quatro cantos em ordem CSS: [topLeft, topRight, bottomRight, bottomLeft].",
+      "type": "array",
+      "items": { "type": "number", "minimum": 0 },
+      "minItems": 4,
+      "maxItems": 4
+    }
+  }
+}

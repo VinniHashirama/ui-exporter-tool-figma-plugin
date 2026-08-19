@@ -1,0 +1,13 @@
+{
+  "name": "Arvore UI Exporter",
+  "id": "arvore-ui-exporter-dev",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "ui": "dist/ui.html",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["none"],
+    "reasoning": "O plugin nao faz nenhuma chamada de rede. O pacote .uiexport e gerado localmente e baixado pelo navegador."
+  }
+}

@@ -1,0 +1,11 @@
+# Pacote .uiexport e um zip: binario.
+*.uiexport binary
+
+# LF no repositorio para o diff nao virar ruido, e porque o CI roda em Linux.
+*.ts text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.yml text eol=lf

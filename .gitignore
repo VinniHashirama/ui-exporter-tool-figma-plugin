@@ -1,0 +1,8 @@
+node_modules/
+.build/
+
+# dist/ NAO entra aqui: e commitado de proposito para o designer nao precisar de Node.
+# Ver "Por que dist/ e commitado" no README.
+
+.DS_Store
+Thumbs.db

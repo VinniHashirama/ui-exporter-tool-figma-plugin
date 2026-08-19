@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # --ignore-scripts: nenhuma dependência precisa de postinstall, e desligar reduz a
+      # superfície de supply chain.
+      - name: Instalar dependências
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Testes
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # O passo que justifica commitar dist/. Se o bundle gerado diferir do commitado, o
+      # designer estaria importando código velho sem ninguém perceber — então falha aqui.
+      - name: dist/ está em sincronia com src/
+        run: |
+          if ! git diff --exit-code --stat dist/; then
+            echo ""
+            echo "::error::dist/ está defasado do src/. Rode 'npm run build' e commite o dist/."
+            exit 1
+          fi
+
+      # Mesma ideia para o sample: ele é golden file dos testes da Unity e precisa ser
+      # reproduzível a partir do código.
+      - name: samples/ é reproduzível
+        run: |
+          npm run sample
+          if ! git diff --exit-code --stat samples/; then
+            echo ""
+            echo "::error::samples/ mudou. Rode 'npm run sample' e commite o resultado."
+            exit 1
+          fi

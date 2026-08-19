@@ -1,0 +1,31 @@
+{
+  "name": "arvore-ui-exporter-figma-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plugin do Figma: exporta uma tela como pacote .uiexport (UIIR + assets) para o importador da Unity.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "sample": "esbuild scripts/make-sample.ts --bundle --platform=node --format=esm --outfile=.build/make-sample.mjs --log-level=warning && node .build/make-sample.mjs",
+    "check": "npm run typecheck && npm run test && npm run build"
+  },
+  "dependencies": {
+    "fflate": "0.8.3"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "1.134.0",
+    "@types/node": "24.13.3",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  }
+}
