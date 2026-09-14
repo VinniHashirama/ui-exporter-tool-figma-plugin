@@ -1,5 +1,169 @@
 "use strict";
 (() => {
+  // src/kit.ts
+  var KIT_CATALOG = [
+    { title: "Containers", items: ["Panel", "Window/Modal", "ScrollView"] },
+    { title: "A\xE7\xF5es", items: ["Button/Primary", "Button/Secondary", "Button/Icon"] },
+    { title: "Entrada", items: ["Toggle/Checkbox", "Slider", "InputField"] },
+    { title: "Exibi\xE7\xE3o", items: ["Label", "Icon", "Image", "ProgressBar"] },
+    { title: "Navega\xE7\xE3o", items: ["Tabs"] }
+  ];
+  var KIT_V1 = [
+    // Containers
+    "Screen",
+    "Panel",
+    "Window/Modal",
+    "ScrollView",
+    // Acoes
+    "Button/Primary",
+    "Button/Secondary",
+    "Button/Icon",
+    // Entrada
+    "Toggle/Checkbox",
+    "Slider",
+    "InputField",
+    // Exibicao
+    "Label",
+    "Icon",
+    "Image",
+    "ProgressBar",
+    // Navegacao
+    "Tabs"
+  ];
+  var KIT_SET = new Set(KIT_V1);
+  var KIT_FAMILIES = new Set(
+    KIT_V1.map((name) => name.split("/")[0])
+  );
+  var CUSTOM_ROLES = ["button", "toggle", "container", "display", "icon", "image"];
+  function isCustomRole(value) {
+    return CUSTOM_ROLES.includes(value);
+  }
+  function isKnownComponent(canonicalName) {
+    return KIT_SET.has(canonicalName);
+  }
+  function looksLikeKitName(canonicalName) {
+    if (KIT_SET.has(canonicalName)) return true;
+    const family = canonicalName.split("/")[0];
+    return family !== void 0 && KIT_FAMILIES.has(family);
+  }
+  var LABEL_PROPERTY_NAMES = ["label", "text", "title", "caption"];
+
+  // src/naming.ts
+  var LOC_SUFFIX = /:([A-Za-z0-9_.-]+)$/;
+  var IMG_SUFFIX = /#img$/i;
+  var NINE_SLICE_SUFFIX = /#9s\(\s*(\d+(?:\s*,\s*\d+){0,3})\s*\)$/i;
+  var SCREEN_PREFIX = /^screen\/([A-Za-z][A-Za-z0-9_]*)$/;
+  var BIND_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+  var CANONICAL_PATTERN = /^[A-Za-z][A-Za-z0-9]*(\/[A-Za-z][A-Za-z0-9]*)*$/;
+  var DISALLOWED_NAME_CHARS = /[^\p{L}\p{N} ._()-]/gu;
+  var MAX_NAME_LENGTH = 64;
+  function parseName(raw) {
+    let working = raw.trim();
+    if (working.startsWith("_")) {
+      return {
+        clean: sanitizeName(working),
+        bind: null,
+        flatten: false,
+        locKey: null,
+        ignored: true,
+        nineSlice: null
+      };
+    }
+    let locKey = null;
+    let flatten = false;
+    let nineSlice = null;
+    for (let pass = 0; pass < 3; pass++) {
+      const loc = working.match(LOC_SUFFIX);
+      if (loc?.[1] !== void 0) {
+        locKey = loc[1];
+        working = working.replace(LOC_SUFFIX, "").trim();
+        continue;
+      }
+      const slice = working.match(NINE_SLICE_SUFFIX);
+      if (slice?.[1] !== void 0) {
+        nineSlice = parseNineSlice(slice[1]);
+        working = working.replace(NINE_SLICE_SUFFIX, "").trim();
+        continue;
+      }
+      if (IMG_SUFFIX.test(working)) {
+        flatten = true;
+        working = working.replace(IMG_SUFFIX, "").trim();
+        continue;
+      }
+      break;
+    }
+    let bind = null;
+    if (working.startsWith("@")) {
+      const candidate = working.slice(1).trim();
+      bind = candidate.length > 0 ? candidate : null;
+      working = candidate;
+    }
+    return { clean: sanitizeName(working), bind, flatten, locKey, ignored: false, nineSlice };
+  }
+  function parseNineSlice(raw) {
+    const parts = raw.split(",").map((part) => Number(part.trim()));
+    if (parts.some((value) => !Number.isFinite(value) || value < 0)) return null;
+    const [a, b, c, d] = parts;
+    if (a === void 0) return null;
+    if (b === void 0) return [a, a, a, a];
+    if (c === void 0) return [a, b, a, b];
+    if (d === void 0) return [a, b, c, b];
+    return [a, b, c, d];
+  }
+  function isValidBind(bind) {
+    return BIND_PATTERN.test(bind);
+  }
+  function parseScreenName(raw) {
+    return raw.trim().match(SCREEN_PREFIX)?.[1] ?? null;
+  }
+  function sanitizeName(raw) {
+    const cleaned = raw.replace(DISALLOWED_NAME_CHARS, " ").replace(/\s+/g, " ").trim().replace(/[.\s]+$/, "").slice(0, MAX_NAME_LENGTH).trim();
+    return cleaned.length > 0 ? cleaned : "Node";
+  }
+  function toAssetId(name, nodeId) {
+    const base = name.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+    const suffix = nodeId.replace(/[^A-Za-z0-9]+/g, "-");
+    return `${base.length > 0 ? base : "asset"}_${suffix}`;
+  }
+  function toKitAssetId(canonicalName, layerName, taken) {
+    const component2 = toKebab(canonicalName) || "component";
+    const part = toKebab(layerName) || "asset";
+    const base = `${component2}_${part}_default`.slice(0, 90);
+    if (!taken.has(base)) {
+      taken.add(base);
+      return base;
+    }
+    for (let n = 2; ; n++) {
+      const candidate = `${base}-${n}`;
+      if (!taken.has(candidate)) {
+        taken.add(candidate);
+        return candidate;
+      }
+    }
+  }
+  function toKebab(raw) {
+    return raw.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  }
+  function toTokenRef(styleName) {
+    const ref = styleName.trim().replace(/\s*\/\s*/g, ".").replace(/\s+/g, "-").replace(/[^A-Za-z0-9_.-]+/g, "").replace(/^[.-]+|[.-]+$/g, "");
+    return ref.length > 0 ? ref : null;
+  }
+  var DEFAULT_NAME_NUMBERED = /^(frame|group|rectangle|ellipse|line|star|polygon|component|instance|slice|text|image)\s+\d+$/i;
+  var DEFAULT_NAME_BARE = /^(vector|union|subtract|intersect|exclude)$/i;
+  function isDefaultLayerName(raw) {
+    const name = raw.trim();
+    return DEFAULT_NAME_NUMBERED.test(name) || DEFAULT_NAME_BARE.test(name);
+  }
+  function normalizeCanonicalName(raw) {
+    const segments = raw.split("/").map((segment) => toPascalCase(segment)).filter((segment) => segment.length > 0);
+    if (segments.length === 0) return null;
+    const joined = segments.join("/");
+    return CANONICAL_PATTERN.test(joined) ? joined : null;
+  }
+  function toPascalCase(raw) {
+    return raw.trim().split(/[\s_-]+/).map((word) => word.replace(/[^A-Za-z0-9]/g, "")).filter((word) => word.length > 0).map((word) => /^[A-Z]/.test(word) ? word : word[0].toUpperCase() + word.slice(1)).join("");
+  }
+
   // src/kit-builder.ts
   var PAGE_NAME = "UI Kit";
   var FONT_FAMILY = "Inter";
@@ -18,49 +182,28 @@
     track: { r: 0.12, g: 0.13, b: 0.17 }
   };
   var SCREEN_TEMPLATE_NAME = "screen/Exemplo";
-  var SECTIONS = [
-    {
-      title: "Containers",
-      items: [
-        { name: "Panel", build: buildPanel },
-        { name: "Window/Modal", build: buildWindow },
-        { name: "ScrollView", build: buildScrollView }
-      ]
-    },
-    {
-      title: "A\xE7\xF5es",
-      items: [
-        { name: "Button/Primary", build: (ctx) => buildTextButton(ctx, "primary") },
-        { name: "Button/Secondary", build: (ctx) => buildTextButton(ctx, "primary-muted") },
-        { name: "Button/Icon", build: buildIconButton }
-      ]
-    },
-    {
-      title: "Entrada",
-      items: [
-        { name: "Toggle/Checkbox", build: buildCheckbox },
-        { name: "Slider", build: buildSlider },
-        { name: "InputField", build: buildInputField }
-      ]
-    },
-    {
-      title: "Exibi\xE7\xE3o",
-      items: [
-        { name: "Label", build: buildLabel },
-        { name: "Icon", build: buildIcon },
-        { name: "Image", build: buildImage },
-        { name: "ProgressBar", build: buildProgressBar }
-      ]
-    },
-    {
-      title: "Navega\xE7\xE3o",
-      items: [{ name: "Tabs", build: buildTabs }]
-    }
-  ];
-  var KIT_COMPONENT_NAMES = SECTIONS.flatMap(
-    (section) => section.items.map((item) => item.name)
+  var KIT_BUILDERS = {
+    Panel: buildPanel,
+    "Window/Modal": buildWindow,
+    ScrollView: buildScrollView,
+    "Button/Primary": (ctx) => buildTextButton(ctx, "primary"),
+    "Button/Secondary": (ctx) => buildTextButton(ctx, "primary-muted"),
+    "Button/Icon": buildIconButton,
+    "Toggle/Checkbox": buildCheckbox,
+    Slider: buildSlider,
+    InputField: buildInputField,
+    Label: buildLabel,
+    Icon: buildIcon,
+    Image: buildImage,
+    ProgressBar: buildProgressBar,
+    Tabs: buildTabs
+  };
+  var KIT_COMPONENT_NAMES = KIT_CATALOG.flatMap(
+    (section) => [...section.items]
   );
-  async function createKit() {
+  async function createKit(only) {
+    const wanted = only === void 0 ? null : new Set(only);
+    const fullKit = wanted === null;
     const result = {
       pageName: PAGE_NAME,
       created: [],
@@ -68,6 +211,13 @@
       stylesCreated: 0,
       warnings: []
     };
+    if (wanted !== null) {
+      for (const name of wanted) {
+        if (KIT_BUILDERS[name] === void 0) {
+          result.warnings.push(`'${name}' n\xE3o est\xE1 no kit; n\xE3o h\xE1 como cri\xE1-lo.`);
+        }
+      }
+    }
     const fonts = await loadFonts(result);
     const page = await findOrCreatePage(PAGE_NAME);
     const ctx = {
@@ -80,9 +230,9 @@
     await ensureColorStyles(ctx);
     await ensureTextStyles(ctx);
     const existing = collectExistingNames(page);
-    const layout = { x: 0, y: 0, rowHeight: 0 };
     const MAX_ROW_WIDTH = 1500;
     const GAP = 64;
+    const layout = { x: 0, y: bottomOf(page, GAP), rowHeight: 0 };
     const place = (node) => {
       if (layout.x > 0 && layout.x + node.width > MAX_ROW_WIDTH) {
         layout.x = 0;
@@ -110,30 +260,170 @@
       page.appendChild(heading);
       layout.y += heading.height + GAP;
     };
-    await section("Tokens");
-    placeSwatches(ctx, place);
-    for (const group of SECTIONS) {
-      await section(group.title);
-      for (const recipe of group.items) {
-        if (existing.has(recipe.name)) {
-          result.skipped.push(recipe.name);
+    if (fullKit) {
+      await section("Tokens");
+      placeSwatches(ctx, place);
+    }
+    const built = [];
+    for (const group of KIT_CATALOG) {
+      const items = group.items.filter((name) => wanted === null || wanted.has(name));
+      if (items.length === 0) {
+        continue;
+      }
+      if (fullKit) {
+        await section(group.title);
+      }
+      for (const name of items) {
+        if (existing.has(name)) {
+          result.skipped.push(name);
           continue;
         }
-        const node = await recipe.build(ctx);
-        node.name = recipe.name;
+        const build2 = KIT_BUILDERS[name];
+        if (build2 === void 0) {
+          continue;
+        }
+        const node = await build2(ctx);
+        node.name = name;
         page.appendChild(node);
         place(node);
-        existing.add(recipe.name);
-        result.created.push(recipe.name);
+        built.push(node);
+        existing.add(name);
+        result.created.push(name);
       }
     }
-    await buildScreenTemplate(ctx, existing);
+    if (fullKit) {
+      await buildScreenTemplate(ctx, existing);
+    }
     await figma.setCurrentPageAsync(page);
-    const focus = page.children.length > 0 ? [page.children[0]] : [];
+    const focus = built.length > 0 ? built : page.children.length > 0 ? [page.children[0]] : [];
     if (focus.length > 0) {
       figma.viewport.scrollAndZoomIntoView(focus);
     }
+    if (built.length > 0) {
+      figma.currentPage.selection = built;
+    }
     return result;
+  }
+  async function createCustomComponent(rawName, role) {
+    const result = {
+      pageName: PAGE_NAME,
+      created: [],
+      skipped: [],
+      stylesCreated: 0,
+      warnings: []
+    };
+    const name = normalizeCanonicalName(rawName);
+    if (name === null) {
+      result.warnings.push(
+        `'${rawName}' n\xE3o vira um nome can\xF4nico v\xE1lido. Use letras e n\xFAmeros, com '/' para agrupar \u2014 por exemplo "HUD/StatBar".`
+      );
+      return result;
+    }
+    if (name !== rawName.trim()) {
+      result.warnings.push(`Normalizei o nome para '${name}'.`);
+    }
+    const fonts = await loadFonts(result);
+    const page = await findOrCreatePage(PAGE_NAME);
+    const ctx = { page, fonts, colors: /* @__PURE__ */ new Map(), texts: /* @__PURE__ */ new Map(), result };
+    await ensureColorStyles(ctx);
+    await ensureTextStyles(ctx);
+    if (collectExistingNames(page).has(name)) {
+      result.skipped.push(name);
+      return result;
+    }
+    const node = await buildCustom(ctx, name, role);
+    node.name = name;
+    page.appendChild(node);
+    node.x = 0;
+    node.y = bottomOf(page, 64);
+    result.created.push(name);
+    await figma.setCurrentPageAsync(page);
+    figma.viewport.scrollAndZoomIntoView([node]);
+    figma.currentPage.selection = [node];
+    return result;
+  }
+  async function buildCustom(ctx, name, role) {
+    const leaf = name.split("/").pop() ?? name;
+    switch (role) {
+      case "button": {
+        const node = component(name, 320, 96);
+        row(node, 12, 32, 20);
+        node.cornerRadius = 20;
+        node.layoutSizingHorizontal = "HUG";
+        await surface(ctx, node, "primary");
+        const iconLeft = rect("$iconLeft", 40, 40, PALETTE.text, 8);
+        iconLeft.visible = false;
+        node.appendChild(iconLeft);
+        const label = await text(ctx, "$label", leaf, { style: "text/button" });
+        node.appendChild(label);
+        const iconRight = rect("$iconRight", 40, 40, PALETTE.text, 8);
+        iconRight.visible = false;
+        node.appendChild(iconRight);
+        const labelProperty = addProperty(node, "label", "TEXT", leaf, ctx.result);
+        if (labelProperty !== null) {
+          bindProperty(label, "characters", labelProperty, ctx.result, "label");
+        }
+        return node;
+      }
+      case "toggle": {
+        const node = component(name, 360, 64);
+        row(node, 16, 0, 0);
+        node.layoutSizingHorizontal = "HUG";
+        node.fills = [];
+        const box = rect("Box", 48, 48, PALETTE["surface-raised"], 10);
+        node.appendChild(box);
+        const check = rect("$checkmark", 28, 28, PALETTE.primary, 6);
+        node.appendChild(check);
+        const label = await text(ctx, "$label", leaf, { style: "text/body", align: "LEFT" });
+        node.appendChild(label);
+        return node;
+      }
+      case "container": {
+        const node = component(name, 600, 400);
+        column(node, 16, 32, 32);
+        node.cornerRadius = 24;
+        await surface(ctx, node, "surface");
+        const content = figma.createFrame();
+        content.name = "$content";
+        content.resizeWithoutConstraints(536, 336);
+        content.fills = [];
+        node.appendChild(content);
+        return node;
+      }
+      case "display": {
+        const node = component(name, 320, 48);
+        row(node, 8, 0, 0);
+        node.layoutSizingHorizontal = "HUG";
+        node.fills = [];
+        const label = await text(ctx, "$label", leaf, { style: "text/body", align: "LEFT" });
+        node.appendChild(label);
+        return node;
+      }
+      case "icon": {
+        const node = component(name, 64, 64);
+        node.fills = [];
+        const glyph = rect("$icon", 64, 64, PALETTE["text-muted"], 8);
+        node.appendChild(glyph);
+        return node;
+      }
+      case "image": {
+        const node = component(name, 240, 180);
+        node.fills = [];
+        const art = rect("$image", 240, 180, PALETTE["surface-raised"], 12);
+        node.appendChild(art);
+        return node;
+      }
+    }
+  }
+  function bottomOf(page, gap) {
+    let bottom = null;
+    for (const child of page.children) {
+      const edge = child.y + child.height;
+      if (bottom === null || edge > bottom) {
+        bottom = edge;
+      }
+    }
+    return bottom === null ? 0 : bottom + gap * 2;
   }
   async function loadFonts(result) {
     const regular = await resolveFont(REGULAR_CANDIDATES, result);
@@ -223,26 +513,34 @@
   function solid(color) {
     return { type: "SOLID", color, opacity: 1 };
   }
-  async function applyFillStyle(node, style) {
+  async function applyFillStyle(node, style, result) {
     try {
       await node.setFillStyleIdAsync(style.id);
+      return;
     } catch {
-      try {
-        ;
-        node.fillStyleId = style.id;
-      } catch {
-      }
+    }
+    try {
+      ;
+      node.fillStyleId = style.id;
+    } catch {
+      result.warnings.push(
+        `N\xE3o consegui vincular '${node.name}' ao estilo de cor '${style.name}'. A cor est\xE1 certa, mas sem token: o export vai avisar \`hardcoded-color\` nessa layer.`
+      );
     }
   }
-  async function applyTextStyle(node, style) {
+  async function applyTextStyle(node, style, result) {
     try {
       await node.setTextStyleIdAsync(style.id);
+      return;
     } catch {
-      try {
-        ;
-        node.textStyleId = style.id;
-      } catch {
-      }
+    }
+    try {
+      ;
+      node.textStyleId = style.id;
+    } catch {
+      result.warnings.push(
+        `N\xE3o consegui vincular '${node.name}' ao estilo de texto '${style.name}'. As m\xE9tricas est\xE3o certas, mas sem token: o export vai avisar \`hardcoded-typography\` nessa layer.`
+      );
     }
   }
   async function text(ctx, name, content, options = {}) {
@@ -258,7 +556,7 @@
     if (styleName !== void 0) {
       const style = ctx.texts.get(styleName);
       if (style !== void 0) {
-        await applyTextStyle(node, style);
+        await applyTextStyle(node, style, ctx.result);
       }
     }
     return node;
@@ -267,7 +565,7 @@
     node.fills = [solid(PALETTE[color])];
     const style = ctx.colors.get(color);
     if (style !== void 0) {
-      await applyFillStyle(node, style);
+      await applyFillStyle(node, style, ctx.result);
     }
   }
   function component(name, width, height) {
@@ -691,7 +989,15 @@
     unsupportedTextCase: "unsupported-text-case",
     multipleFills: "multiple-fills",
     mixedFills: "mixed-fills",
-    emptyScreen: "empty-screen"
+    emptyScreen: "empty-screen",
+    nineSliceTooLarge: "nine-slice-too-large",
+    assetNotMultipleOfFour: "asset-not-multiple-of-4",
+    assetOversized: "asset-oversized",
+    // Export de componente.
+    componentRoot: "component-root",
+    noSlots: "no-slots",
+    duplicateSlot: "duplicate-slot",
+    variantIgnored: "variant-ignored"
   };
   var DiagnosticBag = class {
     constructor() {
@@ -730,115 +1036,6 @@
       return [...this.items].sort((a, b) => rank[a.severity] - rank[b.severity]);
     }
   };
-
-  // src/kit.ts
-  var KIT_V1 = [
-    // Containers
-    "Screen",
-    "Panel",
-    "Window/Modal",
-    "ScrollView",
-    // Acoes
-    "Button/Primary",
-    "Button/Secondary",
-    "Button/Icon",
-    // Entrada
-    "Toggle/Checkbox",
-    "Slider",
-    "InputField",
-    // Exibicao
-    "Label",
-    "Icon",
-    "Image",
-    "ProgressBar",
-    // Navegacao
-    "Tabs"
-  ];
-  var KIT_SET = new Set(KIT_V1);
-  var KIT_FAMILIES = new Set(
-    KIT_V1.map((name) => name.split("/")[0])
-  );
-  function isKnownComponent(canonicalName) {
-    return KIT_SET.has(canonicalName);
-  }
-  function looksLikeKitName(canonicalName) {
-    if (KIT_SET.has(canonicalName)) return true;
-    const family = canonicalName.split("/")[0];
-    return family !== void 0 && KIT_FAMILIES.has(family);
-  }
-  var LABEL_PROPERTY_NAMES = ["label", "text", "title", "caption"];
-
-  // src/naming.ts
-  var LOC_SUFFIX = /:([A-Za-z0-9_.-]+)$/;
-  var IMG_SUFFIX = /#img$/i;
-  var SCREEN_PREFIX = /^screen\/([A-Za-z][A-Za-z0-9_]*)$/;
-  var BIND_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
-  var CANONICAL_PATTERN = /^[A-Za-z][A-Za-z0-9]*(\/[A-Za-z][A-Za-z0-9]*)*$/;
-  var DISALLOWED_NAME_CHARS = /[^\p{L}\p{N} ._()-]/gu;
-  var MAX_NAME_LENGTH = 64;
-  function parseName(raw) {
-    let working = raw.trim();
-    if (working.startsWith("_")) {
-      return { clean: sanitizeName(working), bind: null, flatten: false, locKey: null, ignored: true };
-    }
-    let locKey = null;
-    let flatten = false;
-    for (let pass = 0; pass < 2; pass++) {
-      const loc = working.match(LOC_SUFFIX);
-      if (loc?.[1] !== void 0) {
-        locKey = loc[1];
-        working = working.replace(LOC_SUFFIX, "").trim();
-        continue;
-      }
-      if (IMG_SUFFIX.test(working)) {
-        flatten = true;
-        working = working.replace(IMG_SUFFIX, "").trim();
-        continue;
-      }
-      break;
-    }
-    let bind = null;
-    if (working.startsWith("@")) {
-      const candidate = working.slice(1).trim();
-      bind = candidate.length > 0 ? candidate : null;
-      working = candidate;
-    }
-    return { clean: sanitizeName(working), bind, flatten, locKey, ignored: false };
-  }
-  function isValidBind(bind) {
-    return BIND_PATTERN.test(bind);
-  }
-  function parseScreenName(raw) {
-    return raw.trim().match(SCREEN_PREFIX)?.[1] ?? null;
-  }
-  function sanitizeName(raw) {
-    const cleaned = raw.replace(DISALLOWED_NAME_CHARS, " ").replace(/\s+/g, " ").trim().replace(/[.\s]+$/, "").slice(0, MAX_NAME_LENGTH).trim();
-    return cleaned.length > 0 ? cleaned : "Node";
-  }
-  function toAssetId(name, nodeId) {
-    const base = name.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
-    const suffix = nodeId.replace(/[^A-Za-z0-9]+/g, "-");
-    return `${base.length > 0 ? base : "asset"}_${suffix}`;
-  }
-  function toTokenRef(styleName) {
-    const ref = styleName.trim().replace(/\s*\/\s*/g, ".").replace(/\s+/g, "-").replace(/[^A-Za-z0-9_.-]+/g, "").replace(/^[.-]+|[.-]+$/g, "");
-    return ref.length > 0 ? ref : null;
-  }
-  var DEFAULT_NAME_NUMBERED = /^(frame|group|rectangle|ellipse|line|star|polygon|component|instance|slice|text|image)\s+\d+$/i;
-  var DEFAULT_NAME_BARE = /^(vector|union|subtract|intersect|exclude)$/i;
-  function isDefaultLayerName(raw) {
-    const name = raw.trim();
-    return DEFAULT_NAME_NUMBERED.test(name) || DEFAULT_NAME_BARE.test(name);
-  }
-  function normalizeCanonicalName(raw) {
-    const segments = raw.split("/").map((segment) => toPascalCase(segment)).filter((segment) => segment.length > 0);
-    if (segments.length === 0) return null;
-    const joined = segments.join("/");
-    return CANONICAL_PATTERN.test(joined) ? joined : null;
-  }
-  function toPascalCase(raw) {
-    return raw.trim().split(/[\s_-]+/).map((word) => word.replace(/[^A-Za-z0-9]/g, "")).filter((word) => word.length > 0).map((word) => /^[A-Z]/.test(word) ? word : word[0].toUpperCase() + word.slice(1)).join("");
-  }
 
   // src/tokens.ts
   var TokenCollector = class {
@@ -890,7 +1087,7 @@
   }
 
   // src/uiir.ts
-  var SCHEMA_VERSION = "1.0.0";
+  var SCHEMA_VERSION = "1.1.0";
   var PLUGIN_VERSION = "0.1.0";
 
   // src/mappers/color.ts
@@ -953,6 +1150,43 @@
   function readCorner(node, key) {
     const value = node[key];
     return typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+  }
+  function deriveNineSlice(node) {
+    const corners = mapCornerRadius(node);
+    if (corners === void 0) return void 0;
+    const [topLeft, topRight, bottomRight, bottomLeft] = corners;
+    const stroke = strokeInset(node);
+    const edges = [
+      Math.max(topLeft, topRight) + stroke,
+      Math.max(topRight, bottomRight) + stroke,
+      Math.max(bottomRight, bottomLeft) + stroke,
+      Math.max(bottomLeft, topLeft) + stroke
+    ];
+    return clampNineSlice(edges, node.width, node.height);
+  }
+  function clampNineSlice(edges, width, height) {
+    const maxHorizontal = Math.max(0, Math.floor(width / 2) - 1);
+    const maxVertical = Math.max(0, Math.floor(height / 2) - 1);
+    const clamped = [
+      clamp(edges[0], maxVertical),
+      clamp(edges[1], maxHorizontal),
+      clamp(edges[2], maxVertical),
+      clamp(edges[3], maxHorizontal)
+    ];
+    return clamped.some((value) => value > 0) ? clamped : void 0;
+  }
+  function wasClamped(edges, clamped) {
+    return edges.some((value, index) => Math.floor(value) > clamped[index]);
+  }
+  function clamp(value, max) {
+    return Math.max(0, Math.min(Math.floor(value), max));
+  }
+  function strokeInset(node) {
+    if (!("strokes" in node) || !Array.isArray(node.strokes) || node.strokes.length === 0) {
+      return 0;
+    }
+    const weight = node.strokeWeight;
+    return typeof weight === "number" && Number.isFinite(weight) ? Math.max(0, weight) : 0;
   }
   function round(value) {
     if (!Number.isFinite(value)) return 0;
@@ -1350,6 +1584,109 @@
     "HIGHLIGHT",
     "WASHI_TAPE"
   ]);
+  async function buildComponent(selection, opts) {
+    const bag = new DiagnosticBag();
+    const ctx = {
+      bag,
+      tokens: new TokenCollector(),
+      assets: [],
+      packed: [],
+      binds: /* @__PURE__ */ new Map(),
+      opts,
+      counts: { nodes: 0, components: 0 },
+      // Preenchido assim que o nome canônico é validado, antes de qualquer asset ser
+      // registrado.
+      kitName: null,
+      takenAssetIds: /* @__PURE__ */ new Set()
+    };
+    const empty = (canonicalName2 = null) => ({
+      ir: null,
+      canonicalName: canonicalName2,
+      assets: [],
+      bag,
+      nodeCount: 0,
+      slotCount: 0
+    });
+    if (selection.length === 0) {
+      bag.error(
+        RULES.emptySelection,
+        "Selecione o componente que voce quer exportar (um Component ou um Component Set)."
+      );
+      return empty();
+    }
+    if (selection.length > 1) {
+      bag.error(
+        RULES.emptySelection,
+        `${selection.length} objetos selecionados. Exporte um componente por vez.`
+      );
+      return empty();
+    }
+    const selected = selection[0];
+    if (selected.type !== "COMPONENT" && selected.type !== "COMPONENT_SET") {
+      bag.error(
+        RULES.componentRoot,
+        `A selecao e do tipo ${selected.type}. Para exportar como componente do kit, ela precisa ser um Component (ou um Component Set, se tiver variantes). Selecione a layer e use "Create component" no Figma.`,
+        selected
+      );
+      return empty();
+    }
+    const rawName = selected.name;
+    const canonicalName = normalizeCanonicalName(rawName);
+    if (canonicalName === null) {
+      bag.error(
+        RULES.componentRoot,
+        `O nome "${rawName}" nao vira um nome canonico valido. Use letras e numeros, com "/" para agrupar \u2014 por exemplo "Button/Primary".`,
+        selected
+      );
+      return empty();
+    }
+    ctx.kitName = canonicalName;
+    const { source, ignoredVariants } = pickSourceVariant(selected, bag);
+    if (source === null) {
+      bag.error(
+        RULES.componentRoot,
+        "O Component Set nao tem nenhuma variante utilizavel.",
+        selected
+      );
+      return empty(canonicalName);
+    }
+    const irRoot = await visit(source, null, ctx, { parentHasLayout: false, isRoot: true });
+    if (irRoot === null) {
+      bag.error(RULES.componentRoot, "O componente ficou vazio depois de aplicar as convencoes.");
+      return empty(canonicalName);
+    }
+    irRoot.name = canonicalName.split("/").join("_");
+    const slots = collectSlots(source, ctx);
+    const kit = {
+      canonicalName,
+      role: inferRole(canonicalName, opts.role),
+      slots
+    };
+    if (selected.type === "COMPONENT_SET") kit.sourceVariantId = source.id;
+    if (ignoredVariants.length > 0) kit.ignoredVariants = ignoredVariants;
+    const ir = {
+      schemaVersion: SCHEMA_VERSION,
+      source: readSource(),
+      canvas: {
+        width: round(source.width),
+        height: round(source.height)
+      },
+      kit,
+      assets: ctx.assets,
+      lint: bag.sorted(),
+      root: irRoot
+    };
+    const tokens = ctx.tokens.build();
+    if (tokens !== void 0) ir.tokens = tokens;
+    return {
+      ir,
+      canonicalName,
+      assets: ctx.packed,
+      bag,
+      nodeCount: ctx.counts.nodes,
+      slotCount: slots.length
+    };
+  }
   async function build(selection, opts) {
     const bag = new DiagnosticBag();
     const ctx = {
@@ -1359,7 +1696,11 @@
       packed: [],
       binds: /* @__PURE__ */ new Map(),
       opts,
-      counts: { nodes: 0, components: 0 }
+      counts: { nodes: 0, components: 0 },
+      // Export de tela: o id do asset continua carregando o node id, que é o que garante
+      // unicidade para a reconciliação.
+      kitName: null,
+      takenAssetIds: /* @__PURE__ */ new Set()
     };
     const empty = (screenName2 = null) => ({
       ir: null,
@@ -1432,6 +1773,97 @@
       componentCount: ctx.counts.components
     };
   }
+  function pickSourceVariant(selected, bag) {
+    if (selected.type === "COMPONENT") {
+      return { source: selected, ignoredVariants: [] };
+    }
+    const variants = selected.children.filter(
+      (child) => child.type === "COMPONENT"
+    );
+    if (variants.length === 0) return { source: null, ignoredVariants: [] };
+    const isDefault = (variant) => /(^|,\s*)State\s*=\s*(Default|Normal)(\s*,|$)/i.test(variant.name);
+    const chosen = variants.find(isDefault) ?? variants[0];
+    const ignored = variants.filter((variant) => variant !== chosen).map((variant) => variant.name);
+    if (ignored.length > 0) {
+      bag.info(
+        RULES.variantIgnored,
+        `Exportei a variante "${chosen.name}". As outras ${ignored.length} nao vao no pacote: no MVP os estados vem do prefab do kit, por tint de cor.`,
+        selected
+      );
+    }
+    return { source: chosen, ignoredVariants: ignored };
+  }
+  function collectSlots(root, ctx) {
+    const slots = [];
+    const taken = /* @__PURE__ */ new Set();
+    const add = (rawName, node) => {
+      const name = toSlotName(rawName);
+      if (name === null) return;
+      if (taken.has(name)) {
+        ctx.bag.warn(
+          RULES.duplicateSlot,
+          `O slot "${name}" foi declarado mais de uma vez; vale o primeiro.`,
+          node
+        );
+        return;
+      }
+      taken.add(name);
+      slots.push({ name, nodeId: node.id });
+    };
+    const walk = (node) => {
+      if (node.name.startsWith("$")) {
+        add(node.name.slice(1), node);
+      } else {
+        const references = readPropertyReferences(node);
+        for (const key of references) add(key, node);
+      }
+      if (node.type === "INSTANCE") return;
+      if (!("children" in node)) return;
+      for (const child of node.children) walk(child);
+    };
+    if ("children" in root) {
+      for (const child of root.children) walk(child);
+    }
+    if (slots.length === 0) {
+      ctx.bag.warn(
+        RULES.noSlots,
+        'O componente nao declara nenhum slot, entao o importador nao tem onde escrever texto ou icone. Renomeie as layers que recebem conteudo com "$" na frente \u2014 por exemplo "$label".',
+        root
+      );
+    }
+    return slots;
+  }
+  function readPropertyReferences(node) {
+    let raw;
+    try {
+      raw = node.componentPropertyReferences;
+    } catch {
+      return [];
+    }
+    if (raw === null || typeof raw !== "object") return [];
+    const names = [];
+    for (const value of Object.values(raw)) {
+      if (typeof value !== "string") continue;
+      const base = value.split("#")[0]?.trim();
+      if (base !== void 0 && base.length > 0) names.push(base);
+    }
+    return names;
+  }
+  function toSlotName(raw) {
+    const cleaned = raw.trim().replace(/[^A-Za-z0-9]/g, "");
+    if (cleaned.length === 0 || !/^[A-Za-z]/.test(cleaned)) return null;
+    return cleaned[0].toLowerCase() + cleaned.slice(1);
+  }
+  function inferRole(canonicalName, explicit) {
+    if (explicit !== void 0) return explicit;
+    const family = canonicalName.split("/")[0]?.toLowerCase() ?? "";
+    if (family.startsWith("button")) return "button";
+    if (family.startsWith("toggle")) return "toggle";
+    if (family.startsWith("icon")) return "icon";
+    if (family.startsWith("image")) return "image";
+    if (family.startsWith("panel") || family.startsWith("window")) return "container";
+    return "display";
+  }
   async function visit(node, parent, ctx, { parentHasLayout, isRoot }) {
     if (NON_UI.has(node.type)) return null;
     const parsed = parseName(node.name);
@@ -1484,7 +1916,7 @@
         break;
       }
       case "image": {
-        const assetId = await registerAsset(node, name, ctx);
+        const assetId = await registerAsset(node, name, ctx, parsed.nineSlice);
         if (assetId !== null) {
           irNode.fill = { type: "IMAGE", assetId, scaleMode: readScaleMode(node, parsed.flatten) };
         } else {
@@ -1604,7 +2036,7 @@
     ctx.binds.set(bind, node.id);
     irNode.bind = bind;
   }
-  async function registerAsset(node, name, ctx) {
+  async function registerAsset(node, name, ctx, annotated) {
     const { assetScale, exportAssets } = ctx.opts;
     if (node.width <= 0 || node.height <= 0) {
       ctx.bag.warn(
@@ -1614,7 +2046,7 @@
       );
       return null;
     }
-    const id = toAssetId(name, node.id);
+    const id = ctx.kitName !== null ? toKitAssetId(ctx.kitName, name, ctx.takenAssetIds) : toAssetId(name, node.id);
     const file = `images/${id}@${assetScale}x.png`;
     if (exportAssets) {
       try {
@@ -1639,8 +2071,52 @@
       width: Math.max(1, Math.round(node.width * assetScale)),
       height: Math.max(1, Math.round(node.height * assetScale))
     };
+    const nineSlice = resolveNineSlice(node, annotated, ctx);
+    if (nineSlice !== void 0) asset.nineSlice = nineSlice;
+    reportAssetSize(asset, node, ctx);
     ctx.assets.push(asset);
     return id;
+  }
+  var MAX_TEXTURE_SIZE = 2048;
+  function reportAssetSize(asset, node, ctx) {
+    const { width, height } = asset;
+    if (width > MAX_TEXTURE_SIZE || height > MAX_TEXTURE_SIZE) {
+      ctx.bag.warn(
+        RULES.assetOversized,
+        `${width}x${height}px passa do limite padrao de ${MAX_TEXTURE_SIZE}px, entao a Unity vai reduzir a textura na importacao e a imagem sai menos nitida do que voce desenhou.`,
+        node
+      );
+    }
+    if (width % 4 !== 0 || height % 4 !== 0) {
+      ctx.bag.warn(
+        RULES.assetNotMultipleOfFour,
+        `${width}x${height}px nao e multiplo de 4, entao a compressao em blocos nao se aplica e a textura ocupa varias vezes mais memoria. O importador pode corrigir com preenchimento transparente, ou ajuste o tamanho da layer no Figma.`,
+        node
+      );
+    }
+  }
+  function resolveNineSlice(node, annotated, ctx) {
+    if (annotated !== null) {
+      const clamped = clampNineSlice(annotated, node.width, node.height);
+      if (clamped === void 0) {
+        ctx.bag.warn(
+          RULES.nineSliceTooLarge,
+          `As bordas anotadas nao cabem numa layer de ${round(node.width)}x${round(node.height)} e foram ignoradas.`,
+          node
+        );
+        return void 0;
+      }
+      if (wasClamped(annotated, clamped)) {
+        ctx.bag.warn(
+          RULES.nineSliceTooLarge,
+          `As bordas anotadas nao cabiam na layer e foram reduzidas para [${clamped.join(", ")}]. A Unity exige que as bordas opostas somem menos que o lado.`,
+          node
+        );
+      }
+      return clamped;
+    }
+    if (ctx.opts.deriveSlices !== true) return void 0;
+    return deriveNineSlice(node);
   }
   function readScaleMode(node, flatten) {
     if (flatten || !hasImagePaint(node)) return "STRETCH";
@@ -1690,10 +2166,39 @@
     figma.ui.postMessage(message);
   }
   var scanGeneration = 0;
+  function isComponentSelection(selection) {
+    if (selection.length !== 1) return false;
+    const node = selection[0];
+    if (node.type !== "COMPONENT" && node.type !== "COMPONENT_SET") return false;
+    return parseScreenName(node.name) === null;
+  }
   async function scan() {
     const generation = ++scanGeneration;
+    const selection = figma.currentPage.selection;
     try {
-      const result = await build(figma.currentPage.selection, {
+      if (isComponentSelection(selection)) {
+        const result2 = await buildComponent(selection, {
+          exportAssets: false,
+          assetScale: ASSET_SCALE,
+          deriveSlices: true
+        });
+        if (generation !== scanGeneration) return;
+        post({
+          type: "component-scanned",
+          result: {
+            canonicalName: result2.canonicalName,
+            role: result2.ir?.kit?.role ?? null,
+            width: result2.ir?.canvas.width ?? 0,
+            height: result2.ir?.canvas.height ?? 0,
+            nodeCount: result2.nodeCount,
+            assetCount: result2.ir?.assets.length ?? 0,
+            slots: result2.ir?.kit?.slots.map((slot) => slot.name) ?? [],
+            diagnostics: result2.bag.sorted()
+          }
+        });
+        return;
+      }
+      const result = await build(selection, {
         exportAssets: false,
         assetScale: ASSET_SCALE
       });
@@ -1741,6 +2246,7 @@
         type: "export-ready",
         payload: {
           fileName: `${result.screenName}.uiexport`,
+          jsonEntry: "ui.json",
           json: JSON.stringify(result.ir, null, 2),
           assets: result.assets
         }
@@ -1749,10 +2255,67 @@
       post({ type: "failed", message: describeError2(error) });
     }
   }
-  async function buildKit() {
-    post({ type: "busy", label: "Criando componentes..." });
+  async function exportComponent(role) {
+    post({ type: "busy", label: "Montando o pacote do componente..." });
     try {
-      const result = await createKit();
+      const result = await buildComponent(figma.currentPage.selection, {
+        exportAssets: true,
+        assetScale: ASSET_SCALE,
+        deriveSlices: true,
+        role: role !== void 0 && isCustomRole(role) ? role : void 0
+      });
+      if (result.ir === null || result.canonicalName === null || result.bag.hasErrors) {
+        post({
+          type: "component-scanned",
+          result: {
+            canonicalName: result.canonicalName,
+            role: result.ir?.kit?.role ?? null,
+            width: result.ir?.canvas.width ?? 0,
+            height: result.ir?.canvas.height ?? 0,
+            nodeCount: result.nodeCount,
+            assetCount: result.ir?.assets.length ?? 0,
+            slots: result.ir?.kit?.slots.map((slot) => slot.name) ?? [],
+            diagnostics: result.bag.sorted()
+          }
+        });
+        return;
+      }
+      post({
+        type: "export-ready",
+        payload: {
+          // `Button/Primary` -> `Button_Primary.uikit`: '/' nao pode ir para nome de arquivo.
+          fileName: `${result.canonicalName.split("/").join("_")}.uikit`,
+          jsonEntry: "kit.json",
+          json: JSON.stringify(result.ir, null, 2),
+          assets: result.assets
+        }
+      });
+    } catch (error) {
+      post({ type: "failed", message: describeError2(error) });
+    }
+  }
+  async function buildKit(only) {
+    post({
+      type: "busy",
+      label: only === void 0 ? "Criando componentes..." : `Criando ${only.join(", ")}...`
+    });
+    try {
+      const result = await createKit(only);
+      post({ type: "kit-created", summary: result });
+    } catch (error) {
+      post({ type: "failed", message: describeError2(error) });
+      return;
+    }
+    void scan();
+  }
+  async function buildCustom2(name, role) {
+    if (!isCustomRole(role)) {
+      post({ type: "failed", message: `Papel '${role}' n\xE3o existe.` });
+      return;
+    }
+    post({ type: "busy", label: `Criando ${name}...` });
+    try {
+      const result = await createCustomComponent(name, role);
       post({ type: "kit-created", summary: result });
     } catch (error) {
       post({ type: "failed", message: describeError2(error) });
@@ -1768,8 +2331,14 @@
       case "export":
         void exportScreen();
         break;
+      case "export-component":
+        void exportComponent(message.role);
+        break;
       case "create-kit":
-        void buildKit();
+        void buildKit(message.only);
+        break;
+      case "create-component":
+        void buildCustom2(message.name, message.role);
         break;
       case "select-node":
         void revealNode(message.nodeId);

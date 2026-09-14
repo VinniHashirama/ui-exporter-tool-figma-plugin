@@ -1,5 +1,13 @@
 import { strToU8, zipSync } from 'fflate'
-import type { ExportPayload, KitSummary, SandboxToUi, ScanResult, UiToSandbox } from './messages'
+import { CUSTOM_ROLES, KIT_CATALOG, ROLE_LABELS } from './kit'
+import type {
+  ComponentScanResult,
+  ExportPayload,
+  KitSummary,
+  SandboxToUi,
+  ScanResult,
+  UiToSandbox,
+} from './messages'
 import type { Diagnostic } from './uiir'
 
 function send(message: UiToSandbox): void {
@@ -20,11 +28,33 @@ const exportButton = el<HTMLButtonElement>('export')
 
 const kitPanel = el('panel-kit')
 const exportPanel = el('panel-export')
+const componentPanel = el('panel-component')
 const kitTab = el<HTMLButtonElement>('tab-kit')
 const exportTab = el<HTMLButtonElement>('tab-export')
+const componentTab = el<HTMLButtonElement>('tab-component')
+
+const componentNameEl = el('component-name')
+const componentSizeEl = el('component-size')
+const componentReportEl = el('component-report')
+const componentStatusEl = el('component-status')
+const componentRoleEl = el<HTMLSelectElement>('component-role')
+const exportComponentButton = el<HTMLButtonElement>('export-component')
+
+const componentStats = {
+  nodes: el('stat-component-nodes'),
+  slots: el('stat-component-slots'),
+  assets: el('stat-component-assets'),
+}
 const kitButton = el<HTMLButtonElement>('create-kit')
 const kitStatusEl = el('kit-status')
 const kitResultEl = el('kit-result')
+const kitListEl = el('kit-list')
+const customNameEl = el<HTMLInputElement>('custom-name')
+const customRoleEl = el<HTMLSelectElement>('custom-role')
+const customButton = el<HTMLButtonElement>('create-custom')
+
+/** Botões de criação por componente, para poder desabilitar todos enquanto um roda. */
+const kitRowButtons: HTMLButtonElement[] = []
 
 const stats = {
   nodes: el('stat-nodes'),
@@ -42,22 +72,132 @@ exportButton.addEventListener('click', () => {
 })
 
 kitButton.addEventListener('click', () => {
-  kitButton.disabled = true
-  setKitStatus('Criando componentes...', null)
-  kitResultEl.replaceChildren()
+  startKitWork('Criando componentes...')
   send({ type: 'create-kit' })
 })
 
-exportTab.addEventListener('click', () => selectTab('export'))
-kitTab.addEventListener('click', () => selectTab('kit'))
+/**
+ * Trava os dois caminhos de criação enquanto um roda.
+ *
+ * Dois pedidos concorrentes mexeriam na mesma página e o segundo veria um estado
+ * intermediário do primeiro — inclusive a checagem de "já existe".
+ */
+function startKitWork(label: string): void {
+  kitButton.disabled = true
+  customButton.disabled = true
+  for (const button of kitRowButtons) button.disabled = true
+  setKitStatus(label, null)
+  kitResultEl.replaceChildren()
+}
 
-function selectTab(mode: 'export' | 'kit'): void {
-  const exporting = mode === 'export'
+function endKitWork(): void {
+  kitButton.disabled = false
+  customButton.disabled = false
+  for (const button of kitRowButtons) button.disabled = false
+}
 
-  exportPanel.hidden = !exporting
-  kitPanel.hidden = exporting
-  exportTab.setAttribute('aria-selected', String(exporting))
-  kitTab.setAttribute('aria-selected', String(!exporting))
+function renderRoles(): void {
+  for (const target of [customRoleEl, componentRoleEl]) {
+    for (const role of CUSTOM_ROLES) {
+      const option = document.createElement('option')
+      option.value = role
+      option.textContent = ROLE_LABELS[role]
+      target.append(option)
+    }
+  }
+}
+
+function submitCustom(): void {
+  const name = customNameEl.value.trim()
+
+  if (name.length === 0) {
+    setKitStatus('Dê um nome ao componente, por exemplo "HUD/StatBar".', 'error')
+    customNameEl.focus()
+    return
+  }
+
+  startKitWork(`Criando ${name}...`)
+  send({ type: 'create-component', name, role: customRoleEl.value })
+}
+
+customButton.addEventListener('click', submitCustom)
+
+customNameEl.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') submitCustom()
+})
+
+function renderKitCatalog(): void {
+  kitListEl.replaceChildren()
+
+  for (const group of KIT_CATALOG) {
+    const title = document.createElement('p')
+    title.className = 'kit-group-title'
+    title.textContent = group.title
+    kitListEl.append(title)
+
+    for (const name of group.items) {
+      const row = document.createElement('div')
+      row.className = 'kit-row'
+
+      const label = document.createElement('span')
+      label.className = 'kit-row-name'
+      // textContent, nunca innerHTML: mesmo sendo constante nossa, a regra vale para tudo
+      // que entra no DOM da UI.
+      label.textContent = name
+      row.append(label)
+
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.textContent = 'Criar'
+      button.title = `Criar só ${name} nesta página`
+      button.addEventListener('click', () => {
+        startKitWork(`Criando ${name}...`)
+        send({ type: 'create-kit', only: [name] })
+      })
+
+      kitRowButtons.push(button)
+      row.append(button)
+      kitListEl.append(row)
+    }
+  }
+}
+
+renderKitCatalog()
+renderRoles()
+
+type Tab = 'export' | 'component' | 'kit'
+
+const TABS: ReadonlyArray<{ id: Tab; tab: HTMLButtonElement; panel: HTMLElement }> = [
+  { id: 'export', tab: exportTab, panel: exportPanel },
+  { id: 'component', tab: componentTab, panel: componentPanel },
+  { id: 'kit', tab: kitTab, panel: kitPanel },
+]
+
+for (const entry of TABS) {
+  entry.tab.addEventListener('click', () => selectTab(entry.id))
+}
+
+/** true depois que o usuario clica numa aba: a partir dai a selecao para de trocar sozinha. */
+let tabPinned = false
+
+function selectTab(mode: Tab, byUser = true): void {
+  if (byUser) tabPinned = true
+
+  for (const entry of TABS) {
+    const active = entry.id === mode
+    entry.panel.hidden = !active
+    entry.tab.setAttribute('aria-selected', String(active))
+  }
+}
+
+/**
+ * Leva para a aba do que foi selecionado, ate o usuario escolher uma aba na mao.
+ *
+ * Selecionar um componente e continuar vendo "nenhuma tela selecionada" faria o plugin
+ * parecer quebrado. Depois de uma escolha explicita, respeitar essa escolha.
+ */
+function followSelection(mode: Tab): void {
+  if (!tabPinned) selectTab(mode, false)
 }
 
 window.onmessage = (event: MessageEvent): void => {
@@ -68,10 +208,17 @@ window.onmessage = (event: MessageEvent): void => {
     case 'scanned':
       current = message.result
       render(message.result)
+      if (message.result.screenName !== null) followSelection('export')
+      break
+    case 'component-scanned':
+      renderComponent(message.result)
+      if (message.result.canonicalName !== null) followSelection('component')
       break
     case 'busy':
       exportButton.disabled = true
+      exportComponentButton.disabled = true
       setStatus(message.label, null)
+      setComponentStatus(message.label, null)
       break
     case 'export-ready':
       void deliver(message.payload)
@@ -80,18 +227,105 @@ window.onmessage = (event: MessageEvent): void => {
       renderKitResult(message.summary)
       break
     case 'failed':
-      // Um erro pode vir de qualquer um dos dois fluxos; mostrar nos dois evita a mensagem
+      // Um erro pode vir de qualquer um dos fluxos; mostrar em todos evita a mensagem
       // aparecer numa aba que o usuário não está olhando.
       setStatus(message.message, 'error')
+      setComponentStatus(message.message, 'error')
       setKitStatus(message.message, 'error')
       exportButton.disabled = true
-      kitButton.disabled = false
+      exportComponentButton.disabled = true
+      endKitWork()
       break
   }
 }
 
+exportComponentButton.addEventListener('click', () => {
+  exportComponentButton.disabled = true
+  setComponentStatus('Montando o pacote...', null)
+  send({ type: 'export-component', role: componentRoleEl.value })
+})
+
+function renderComponent(result: ComponentScanResult): void {
+  componentStats.nodes.textContent = String(result.nodeCount)
+  componentStats.slots.textContent = String(result.slots.length)
+  componentStats.assets.textContent = String(result.assetCount)
+
+  const hasErrors = result.diagnostics.some((item) => item.severity === 'error')
+  const ready = result.canonicalName !== null && !hasErrors
+
+  exportComponentButton.disabled = !ready
+  setComponentStatus('', null)
+
+  if (result.canonicalName === null) {
+    componentNameEl.textContent = 'Nenhum componente selecionado'
+    componentNameEl.classList.add('unset')
+    componentSizeEl.textContent = 'Selecione um Component ou Component Set'
+  } else {
+    componentNameEl.textContent = result.canonicalName
+    componentNameEl.classList.remove('unset')
+    componentSizeEl.textContent = `${result.width} x ${result.height} px`
+  }
+
+  // O papel vem inferido do nome; o designer pode trocar antes de exportar.
+  if (result.role !== null) componentRoleEl.value = result.role
+
+  componentReportEl.replaceChildren()
+
+  if (result.slots.length > 0) {
+    const heading = document.createElement('p')
+    heading.className = 'section-title'
+    heading.textContent = 'Slots'
+    componentReportEl.append(heading)
+
+    const chips = document.createElement('div')
+    chips.className = 'slot-chips'
+
+    for (const slot of result.slots) {
+      const chip = document.createElement('span')
+      chip.className = 'slot-chip'
+      chip.textContent = slot
+      chips.append(chip)
+    }
+
+    componentReportEl.append(chips)
+  }
+
+  const errors = result.diagnostics.filter((item) => item.severity === 'error')
+  const warnings = result.diagnostics.filter((item) => item.severity !== 'error')
+
+  if (errors.length > 0) {
+    componentReportEl.append(section('Erros', errors, 'Corrija para poder exportar.'))
+  }
+  if (warnings.length > 0) {
+    componentReportEl.append(section('Avisos', warnings, null))
+  }
+  if (errors.length === 0 && warnings.length === 0) {
+    componentReportEl.append(
+      result.canonicalName !== null
+        ? emptyState('Tudo certo', 'Nenhum problema encontrado. Pode exportar.')
+        : emptyState(
+            'Nada para analisar',
+            'Selecione o componente que você quer levar para a Unity. Se ainda for um frame ' +
+              'comum, transforme em Component primeiro.',
+          ),
+    )
+  }
+
+  exportComponentButton.textContent =
+    result.canonicalName !== null ? `Exportar ${result.canonicalName}` : 'Exportar componente'
+
+  if (errors.length > 0) {
+    setComponentStatus(`${errors.length} erro(s) bloqueando o export`, 'error')
+  }
+}
+
+function setComponentStatus(message: string, severity: 'error' | 'success' | null): void {
+  componentStatusEl.textContent = message
+  componentStatusEl.className = severity === null ? 'status' : `status ${severity}`
+}
+
 function renderKitResult(summary: KitSummary): void {
-  kitButton.disabled = false
+  endKitWork()
 
   const parts: string[] = []
   if (summary.created.length > 0) parts.push(`${summary.created.length} criado(s)`)
@@ -302,7 +536,7 @@ function setStatus(message: string, kind: 'error' | 'success' | null): void {
  */
 async function deliver(payload: ExportPayload): Promise<void> {
   try {
-    const files: Record<string, Uint8Array> = { 'ui.json': strToU8(payload.json) }
+    const files: Record<string, Uint8Array> = { [payload.jsonEntry]: strToU8(payload.json) }
     for (const asset of payload.assets) {
       files[asset.path] = asset.bytes
     }

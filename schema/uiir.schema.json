@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://arvore.io/schemas/uiir/1.0.0/uiir.schema.json",
+  "$id": "https://arvore.io/schemas/uiir/1.1.0/uiir.schema.json",
   "title": "UIIR — UI Intermediate Representation",
-  "description": "Representação neutra de uma tela de UI. Única fronteira entre o plugin do Figma e o importador da Unity. Nenhum campo é específico de Figma ou de Unity.",
+  "description": "Representação neutra de uma UI. Única fronteira entre o plugin do Figma e o importador da Unity. Nenhum campo é específico de Figma ou de Unity. Descreve dois tipos de pacote: o de tela (`ui.json`, sem o bloco `kit`) e o de componente (`kit.json`, com ele).",
   "type": "object",
   "required": ["schemaVersion", "source", "canvas", "root"],
   "additionalProperties": false,
@@ -15,6 +15,7 @@
     },
     "source": { "$ref": "#/$defs/source" },
     "canvas": { "$ref": "#/$defs/canvas" },
+    "kit": { "$ref": "#/$defs/kit" },
     "tokens": { "$ref": "#/$defs/tokens" },
     "assets": {
       "description": "Imagens embarcadas no pacote. Referenciadas por assetId.",
@@ -47,7 +48,7 @@
     },
 
     "canvas": {
-      "description": "Tamanho do frame raiz em px de design. Vira CanvasScaler.referenceResolution.",
+      "description": "Tamanho do frame raiz em px de design. Numa tela vira CanvasScaler.referenceResolution; num componente é o tamanho de design do prefab.",
       "type": "object",
       "required": ["width", "height"],
       "additionalProperties": false,
@@ -55,6 +56,55 @@
         "width": { "type": "number", "exclusiveMinimum": 0 },
         "height": { "type": "number", "exclusiveMinimum": 0 },
         "orientation": { "enum": ["portrait", "landscape"] }
+      }
+    },
+
+    "kit": {
+      "description": "Presente apenas no pacote de componente (`kit.json`). É o que diz ao importador para gerar um prefab do kit em vez de uma tela. Ausente = pacote de tela.",
+      "type": "object",
+      "required": ["canonicalName", "role", "slots"],
+      "additionalProperties": false,
+      "properties": {
+        "canonicalName": {
+          "description": "Nome canônico do componente, ex. Button/Primary. Case-sensitive e igual ao que o prefab do kit declara em UIKitComponent.",
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9]*(/[A-Za-z][A-Za-z0-9]*)*$"
+        },
+        "role": {
+          "description": "Que espécie de coisa é, para o importador escolher o esqueleto de comportamento. A forma no Figma não distingue um botão de um rótulo: um retângulo com texto dentro pode ser os dois.",
+          "enum": ["button", "toggle", "container", "display", "icon", "image"]
+        },
+        "sourceVariantId": {
+          "description": "Id da variante do ComponentSet de onde o export saiu. Cada variante tem ids de node próprios, então exportar de outra variante depois trocaria todos os ids de uma vez e o importador recriaria o prefab inteiro. O importador recusa quando este valor muda.",
+          "type": "string",
+          "minLength": 1
+        },
+        "ignoredVariants": {
+          "description": "Variantes que existem no Figma mas não vieram neste pacote. Informativo: no MVP só o estado default é exportado, e os demais estados vêm do prefab.",
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "slots": {
+          "description": "Pontos de injeção que o componente expõe. Cada um aponta para um node por id, nunca por nome: o designer renomeia layer o tempo todo, e o id sobrevive a isso.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/kitSlot" },
+          "default": []
+        }
+      }
+    },
+
+    "kitSlot": {
+      "type": "object",
+      "required": ["name", "nodeId"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "Nome do slot conforme a spec do kit: label, icon, iconLeft, iconRight, title, content, checkmark...",
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9]*$"
+        },
+        "nodeId": { "type": "string", "minLength": 1 }
       }
     },
 
@@ -110,7 +160,7 @@
         "width": { "type": "integer", "exclusiveMinimum": 0 },
         "height": { "type": "integer", "exclusiveMinimum": 0 },
         "nineSlice": {
-          "description": "Bordas de 9-slice em px de design, ordem CSS [top, right, bottom, left]. Ausente = sprite simples. Sempre ausente no MVP (detecção automática é v0.2); só é preenchido quando o designer anota explicitamente.",
+          "description": "Bordas de 9-slice em px de design, ordem CSS [top, right, bottom, left]. Ausente = sprite simples. Preenchido de duas formas: pela anotação `#9s(t,r,b,l)` no nome da layer, que vale em qualquer export; ou derivado do raio dos cantos mais a espessura do traço, e isso só no export de componente — numa tela, `#img` marca ilustração, que fatiada sairia deformada. Os valores são sempre clampados para caber no sprite, porque bordas opostas que somem mais que o lado geram sprite degenerado.",
           "$ref": "#/$defs/edges"
         }
       }

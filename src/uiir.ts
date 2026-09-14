@@ -5,7 +5,11 @@
  * do plugin (tests/schema.test.ts). Mudou aqui, mude la, e vice-versa.
  */
 
-export const SCHEMA_VERSION = '1.0.0'
+/**
+ * 1.1.0: bloco `kit` opcional, para o pacote de componente. Campo novo e opcional e MINOR
+ * pela regra do contrato — um importador 1.0 le o pacote de tela normalmente.
+ */
+export const SCHEMA_VERSION = '1.1.0'
 export const PLUGIN_VERSION = '0.1.0'
 
 export type Color = string
@@ -171,10 +175,47 @@ export interface IRNode {
   children?: IRNode[]
 }
 
+/** Papel do componente: o que o Figma nao consegue expressar sobre comportamento. */
+export type KitRole = 'button' | 'toggle' | 'container' | 'display' | 'icon' | 'image'
+
+/**
+ * Ponto de injecao que o componente expoe ao importador.
+ *
+ * O `nodeId` e o que liga o slot ao objeto de verdade dentro do prefab. Casar por nome seria
+ * fragil: o designer renomeia layer o tempo todo, e o id sobrevive a isso.
+ */
+export interface KitSlot {
+  name: string
+  nodeId: string
+}
+
+/**
+ * Cabecalho do pacote de componente.
+ *
+ * Presente apenas em `kit.json`; um pacote de tela nao tem este bloco. E o que diz ao
+ * importador que ele deve gerar um prefab de kit em vez de uma tela.
+ */
+export interface Kit {
+  canonicalName: string
+  role: KitRole
+  /**
+   * Variante do ComponentSet de onde este export saiu.
+   *
+   * Travar isso importa: cada variante tem ids de node proprios, entao exportar de uma
+   * variante diferente depois trocaria TODOS os ids de uma vez, e o importador recriaria o
+   * prefab inteiro — perdendo o que o dev tivesse pendurado nele.
+   */
+  sourceVariantId?: string
+  /** Nomes das variantes que existem no Figma mas nao vieram neste pacote. */
+  ignoredVariants?: string[]
+  slots: KitSlot[]
+}
+
 export interface UIIR {
   schemaVersion: string
   source: Source
   canvas: Canvas
+  kit?: Kit
   tokens?: Tokens
   assets: Asset[]
   lint: Diagnostic[]
