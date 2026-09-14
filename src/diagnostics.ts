@@ -26,6 +26,14 @@ export const RULES = {
   multipleFills: 'multiple-fills',
   mixedFills: 'mixed-fills',
   emptyScreen: 'empty-screen',
+  nineSliceTooLarge: 'nine-slice-too-large',
+  assetNotMultipleOfFour: 'asset-not-multiple-of-4',
+  assetOversized: 'asset-oversized',
+  // Export de componente.
+  componentRoot: 'component-root',
+  noSlots: 'no-slots',
+  duplicateSlot: 'duplicate-slot',
+  variantIgnored: 'variant-ignored',
 } as const
 
 /** Acumula diagnosticos e responde se o export pode seguir. */

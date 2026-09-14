@@ -23,6 +23,7 @@ describe('parseName', () => {
       flatten: false,
       locKey: null,
       ignored: false,
+      nineSlice: null,
     })
   })
 

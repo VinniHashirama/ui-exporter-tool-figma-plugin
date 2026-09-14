@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { KIT_COMPONENT_NAMES, SCREEN_TEMPLATE_NAME } from '../src/kit-builder'
-import { isKnownComponent, KIT_V1 } from '../src/kit'
+import { KIT_BUILDERS, KIT_COMPONENT_NAMES, SCREEN_TEMPLATE_NAME } from '../src/kit-builder'
+import {
+  CUSTOM_ROLES,
+  isCustomRole,
+  isKnownComponent,
+  KIT_CATALOG,
+  KIT_V1,
+  ROLE_LABELS,
+} from '../src/kit'
 import { normalizeCanonicalName, parseScreenName } from '../src/naming'
 
 /**
@@ -36,9 +43,55 @@ describe('gerador de kit do Figma', () => {
     }
   })
 
+  it('todo nome do catálogo tem um construtor, e todo construtor está no catálogo', () => {
+    // O catálogo é o que a UI do plugin lista para o designer; os construtores são o que o
+    // botão realmente cria. Divergir aqui significa oferecer um componente que não nasce, ou
+    // ter um componente que ninguém consegue pedir.
+    const catalog = KIT_CATALOG.flatMap((section) => [...section.items]).sort()
+    const builders = Object.keys(KIT_BUILDERS).sort()
+
+    expect(builders).toEqual(catalog)
+  })
+
+  it('o catálogo não repete nome entre seções', () => {
+    const all = KIT_CATALOG.flatMap((section) => [...section.items])
+    expect(new Set(all).size).toBe(all.length)
+  })
+
   it('o template de tela passa na regra de frame raiz do exportador', () => {
     // O designer duplica este frame e exporta. Se o nome não casar com a regra, o primeiro
     // export dele falharia com root-frame-name.
     expect(parseScreenName(SCREEN_TEMPLATE_NAME)).toBe('Exemplo')
+  })
+})
+
+describe('componente customizado', () => {
+  it('todo papel tem rótulo para o designer', () => {
+    for (const role of CUSTOM_ROLES) {
+      expect(ROLE_LABELS[role], `'${role}' está sem rótulo`).toBeTruthy()
+    }
+
+    expect(Object.keys(ROLE_LABELS).sort()).toEqual([...CUSTOM_ROLES].sort())
+  })
+
+  it('isCustomRole aceita só os papéis conhecidos', () => {
+    for (const role of CUSTOM_ROLES) {
+      expect(isCustomRole(role)).toBe(true)
+    }
+
+    // O valor vem da UI, que é outro contexto de execução: o sandbox não pode confiar nele.
+    expect(isCustomRole('button; drop table')).toBe(false)
+    expect(isCustomRole('')).toBe(false)
+    expect(isCustomRole('Button')).toBe(false)
+  })
+
+  it('o nome do componente customizado sobrevive à normalização do exportador', () => {
+    // Mesma garantia que o kit canônico tem: se o nome não normaliza para ele mesmo, a
+    // instância não resolveria no import.
+    expect(normalizeCanonicalName('HUD/StatBar')).toBe('HUD/StatBar')
+    expect(normalizeCanonicalName('item slot')).toBe('ItemSlot')
+    expect(normalizeCanonicalName('  card  ')).toBe('Card')
+    expect(normalizeCanonicalName('///')).toBeNull()
+    expect(normalizeCanonicalName('9Lives')).toBeNull()
   })
 })

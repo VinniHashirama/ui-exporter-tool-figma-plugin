@@ -18,8 +18,9 @@ import Ajv2020 from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
 import { readFileSync } from 'node:fs'
 import { zipSync, strToU8 } from 'fflate'
-import { build } from '../src/traverse'
+import { build, buildComponent } from '../src/traverse'
 import {
+  component,
   frame,
   group,
   installFigmaGlobal,
@@ -45,6 +46,14 @@ const SIBLING_TARGETS = [
 ] as const
 
 const localTarget = `${here}/../samples/HomeMenu.uiexport`
+
+/** O mesmo, para o pacote de componente. */
+const KIT_SIBLING_TARGETS = [
+  { repo: 'ui-exporter-tool-unity-package', file: 'Samples~/Button_Primary.uikit' },
+  { repo: 'ui-exporter-tool-docs-and-samples', file: 'samples/Button_Primary.uikit' },
+] as const
+
+const kitLocalTarget = `${here}/../samples/Button_Primary.uikit`
 
 /** Fixo para o pacote ser byte-a-byte reproduzivel: ele e golden file dos testes. */
 const FIXED_TIMESTAMP = '2026-01-01T00:00:00.000Z'
@@ -127,6 +136,7 @@ installFigmaGlobal({
     'S:panel': 'color/surface',
     'S:h1': 'text/h1',
     'S:body': 'text/body',
+    'S:button': 'text/button',
   },
 })
 
@@ -268,6 +278,52 @@ const screen = frame({
   ],
 })
 
+/**
+ * Componente do kit de exemplo: um botao com fundo achatado e um label em slot.
+ *
+ * O fundo e `#img` de proposito — e o caso em que a borda de 9-slice tem que ser derivada do
+ * raio, que e justamente o que o importador precisa exercitar. Um botao de cor chapada nao
+ * geraria asset nenhum e o golden file nao cobriria esse caminho.
+ */
+const buttonComponent = component({
+  name: 'Button/Primary',
+  width: 320,
+  height: 96,
+  cornerRadius: 20,
+  layoutMode: 'HORIZONTAL',
+  itemSpacing: 12,
+  paddingLeft: 32,
+  paddingRight: 32,
+  paddingTop: 20,
+  paddingBottom: 20,
+  primaryAxisAlignItems: 'CENTER',
+  counterAxisAlignItems: 'CENTER',
+  children: [
+    frame({
+      name: 'bg#img',
+      x: 0,
+      y: 0,
+      width: 320,
+      height: 96,
+      cornerRadius: 20,
+      fills: [solidPaint(0.05, 0.6, 1)],
+    }),
+    text({
+      name: '$label',
+      characters: 'Jogar',
+      fontFamily: 'Nunito',
+      fontStyle: 'Bold',
+      fontSize: 32,
+      x: 40,
+      y: 28,
+      width: 240,
+      height: 40,
+      textAlignHorizontal: 'CENTER',
+      textStyleId: 'S:button',
+    }),
+  ],
+})
+
 // ---------------------------------------------------------------- monta e valida
 
 const result = await build([screen], { exportAssets: true, assetScale: 2 })
@@ -329,23 +385,78 @@ const packed = zipSync(files, { level: 6, mtime: FIXED_TIMESTAMP })
 const written: string[] = []
 const skipped: string[] = []
 
-mkdirSync(dirname(localTarget), { recursive: true })
-writeFileSync(localTarget, packed)
-written.push('samples/HomeMenu.uiexport')
+function emit(
+  bytes: Uint8Array,
+  local: string,
+  localLabel: string,
+  targets: ReadonlyArray<{ repo: string; file: string }>,
+): void {
+  mkdirSync(dirname(local), { recursive: true })
+  writeFileSync(local, bytes)
+  written.push(localLabel)
 
-for (const target of SIBLING_TARGETS) {
-  const repoDir = `${here}/../../${target.repo}`
+  for (const target of targets) {
+    const repoDir = `${here}/../../${target.repo}`
 
-  if (!existsSync(repoDir)) {
-    skipped.push(`${target.repo} (nao clonado ao lado)`)
-    continue
+    if (!existsSync(repoDir)) {
+      skipped.push(`${target.repo} (nao clonado ao lado)`)
+      continue
+    }
+
+    const destination = `${repoDir}/${target.file}`
+    mkdirSync(dirname(destination), { recursive: true })
+    writeFileSync(destination, bytes)
+    written.push(`${target.repo}/${target.file}`)
   }
-
-  const destination = `${repoDir}/${target.file}`
-  mkdirSync(dirname(destination), { recursive: true })
-  writeFileSync(destination, packed)
-  written.push(`${target.repo}/${target.file}`)
 }
+
+emit(packed, localTarget, 'samples/HomeMenu.uiexport', SIBLING_TARGETS)
+
+// ------------------------------------------------- pacote de componente do kit
+
+const kitResult = await buildComponent([buttonComponent], {
+  exportAssets: true,
+  assetScale: 2,
+  deriveSlices: true,
+})
+
+if (kitResult.ir === null || kitResult.canonicalName === null || kitResult.bag.hasErrors) {
+  console.error('build do componente falhou:')
+  for (const item of kitResult.bag.sorted()) {
+    console.error(`  [${item.severity}] ${item.rule}: ${item.message}`)
+  }
+  process.exit(1)
+}
+
+if (!ajv.validate(schema, kitResult.ir)) {
+  console.error('o IR do componente nao valida contra o schema:')
+  for (const error of ajv.errors ?? []) {
+    console.error(`  ${error.instancePath} ${error.message}`)
+  }
+  process.exit(1)
+}
+
+kitResult.ir.source.exportedAt = FIXED_TIMESTAMP
+
+const kitFiles: Record<string, Uint8Array> = {
+  'kit.json': strToU8(JSON.stringify(kitResult.ir, null, 2)),
+}
+
+for (const asset of kitResult.assets) {
+  const declared = kitResult.ir.assets.find((entry) => entry.file === asset.path)
+  if (declared === undefined) {
+    console.error(`asset ${asset.path} nao tem entrada no IR do componente`)
+    process.exit(1)
+  }
+  kitFiles[asset.path] = makePng(declared.width, declared.height, [40, 120, 220, 255])
+}
+
+emit(
+  zipSync(kitFiles, { level: 6, mtime: FIXED_TIMESTAMP }),
+  kitLocalTarget,
+  'samples/Button_Primary.uikit',
+  KIT_SIBLING_TARGETS,
+)
 
 const warnings = result.bag.sorted().filter((item) => item.severity === 'warning')
 
@@ -355,9 +466,18 @@ for (const path of written) {
 for (const path of skipped) {
   console.log(`pulado:  ${path}`)
 }
-console.log(`  ${result.nodeCount} layers, ${result.componentCount} componentes, ${result.bindCount} binds`)
-console.log(`  ${Object.keys(files).length} arquivos no pacote`)
-console.log(`  ${warnings.length} aviso(s) de lint`)
+console.log(`  tela: ${result.nodeCount} layers, ${result.componentCount} componentes, ${result.bindCount} binds`)
+console.log(`  tela: ${Object.keys(files).length} arquivos, ${warnings.length} aviso(s) de lint`)
 for (const item of warnings) {
+  console.log(`    ${item.rule}: ${item.nodeName ?? '-'}`)
+}
+
+const kitWarnings = kitResult.bag.sorted().filter((item) => item.severity === 'warning')
+
+console.log(
+  `  componente: ${kitResult.nodeCount} layers, ${kitResult.slotCount} slot(s), ` +
+    `${Object.keys(kitFiles).length} arquivos, ${kitWarnings.length} aviso(s) de lint`,
+)
+for (const item of kitWarnings) {
   console.log(`    ${item.rule}: ${item.nodeName ?? '-'}`)
 }

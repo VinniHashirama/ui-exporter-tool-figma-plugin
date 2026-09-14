@@ -11,6 +11,10 @@
  * parecidos e a comparação visual do piloto tem alguma chance de significar algo.
  */
 
+import { KIT_CATALOG } from './kit'
+import type { CustomRole } from './kit'
+import { normalizeCanonicalName } from './naming'
+
 const PAGE_NAME = 'UI Kit'
 
 const FONT_FAMILY = 'Inter'
@@ -46,61 +50,35 @@ export interface KitResult {
 /** Nome do frame de exemplo que o designer duplica para começar uma tela. */
 export const SCREEN_TEMPLATE_NAME = 'screen/Exemplo'
 
-interface Recipe {
-  name: string
-  build: (ctx: Ctx) => Promise<ComponentNode | ComponentSetNode>
-}
+type Builder = (ctx: Ctx) => Promise<ComponentNode | ComponentSetNode>
 
 /**
- * O kit como dado, e não como sequência de chamadas.
+ * Como construir cada nome canônico do catálogo.
  *
- * Assim a lista de nomes canônicos exportada abaixo é derivada da mesma fonte que constrói
- * os componentes — não há como acrescentar um componente e esquecer de listá-lo, nem o
- * contrário.
+ * O agrupamento e a ordem vivem em `KIT_CATALOG` (`kit.ts`), que a UI do plugin também lê.
+ * Aqui fica só o "como": assim a lista que o designer vê e o que o botão cria são a mesma
+ * fonte, e `kit.test.ts` cobra que todo nome do catálogo tenha um construtor.
  */
-const SECTIONS: ReadonlyArray<{ title: string; items: readonly Recipe[] }> = [
-  {
-    title: 'Containers',
-    items: [
-      { name: 'Panel', build: buildPanel },
-      { name: 'Window/Modal', build: buildWindow },
-      { name: 'ScrollView', build: buildScrollView },
-    ],
-  },
-  {
-    title: 'Ações',
-    items: [
-      { name: 'Button/Primary', build: (ctx) => buildTextButton(ctx, 'primary') },
-      { name: 'Button/Secondary', build: (ctx) => buildTextButton(ctx, 'primary-muted') },
-      { name: 'Button/Icon', build: buildIconButton },
-    ],
-  },
-  {
-    title: 'Entrada',
-    items: [
-      { name: 'Toggle/Checkbox', build: buildCheckbox },
-      { name: 'Slider', build: buildSlider },
-      { name: 'InputField', build: buildInputField },
-    ],
-  },
-  {
-    title: 'Exibição',
-    items: [
-      { name: 'Label', build: buildLabel },
-      { name: 'Icon', build: buildIcon },
-      { name: 'Image', build: buildImage },
-      { name: 'ProgressBar', build: buildProgressBar },
-    ],
-  },
-  {
-    title: 'Navegação',
-    items: [{ name: 'Tabs', build: buildTabs }],
-  },
-]
+export const KIT_BUILDERS: Readonly<Record<string, Builder>> = {
+  Panel: buildPanel,
+  'Window/Modal': buildWindow,
+  ScrollView: buildScrollView,
+  'Button/Primary': (ctx) => buildTextButton(ctx, 'primary'),
+  'Button/Secondary': (ctx) => buildTextButton(ctx, 'primary-muted'),
+  'Button/Icon': buildIconButton,
+  'Toggle/Checkbox': buildCheckbox,
+  Slider: buildSlider,
+  InputField: buildInputField,
+  Label: buildLabel,
+  Icon: buildIcon,
+  Image: buildImage,
+  ProgressBar: buildProgressBar,
+  Tabs: buildTabs,
+}
 
 /** Nomes canônicos que este gerador cria. Testado contra o kit v1 do contrato. */
-export const KIT_COMPONENT_NAMES: readonly string[] = SECTIONS.flatMap((section) =>
-  section.items.map((item) => item.name),
+export const KIT_COMPONENT_NAMES: readonly string[] = KIT_CATALOG.flatMap(
+  (section) => [...section.items],
 )
 
 interface Fonts {
@@ -118,13 +96,32 @@ interface Ctx {
   result: KitResult
 }
 
-export async function createKit(): Promise<KitResult> {
+/**
+ * Cria os componentes do kit na página `UI Kit`.
+ *
+ * @param only
+ * Nomes canônicos a criar. Omitido, cria o kit inteiro mais os tokens e o template de tela —
+ * o caminho de quem está começando um arquivo. Informado, cria só o que foi pedido, que é o
+ * caminho de quem já tem o kit e quer um componente a mais sem mexer no resto.
+ */
+export async function createKit(only?: readonly string[]): Promise<KitResult> {
+  const wanted = only === undefined ? null : new Set(only)
+  const fullKit = wanted === null
+
   const result: KitResult = {
     pageName: PAGE_NAME,
     created: [],
     skipped: [],
     stylesCreated: 0,
     warnings: [],
+  }
+
+  if (wanted !== null) {
+    for (const name of wanted) {
+      if (KIT_BUILDERS[name] === undefined) {
+        result.warnings.push(`'${name}' não está no kit; não há como criá-lo.`)
+      }
+    }
   }
 
   const fonts = await loadFonts(result)
@@ -144,9 +141,12 @@ export async function createKit(): Promise<KitResult> {
   const existing = collectExistingNames(page)
 
   // Cursor de layout simples: seções empilhadas, componentes em linhas que quebram.
-  const layout = { x: 0, y: 0, rowHeight: 0 }
   const MAX_ROW_WIDTH = 1500
   const GAP = 64
+
+  // Começa abaixo do que já está na página. Sem isto, criar um componente avulso num
+  // arquivo que já tem o kit o colocaria em cima do que existe.
+  const layout = { x: 0, y: bottomOf(page, GAP), rowHeight: 0 }
 
   const place = (node: SceneNode): void => {
     if (layout.x > 0 && layout.x + node.width > MAX_ROW_WIDTH) {
@@ -179,37 +179,249 @@ export async function createKit(): Promise<KitResult> {
     layout.y += heading.height + GAP
   }
 
-  await section('Tokens')
-  placeSwatches(ctx, place)
+  if (fullKit) {
+    await section('Tokens')
+    placeSwatches(ctx, place)
+  }
 
-  for (const group of SECTIONS) {
-    await section(group.title)
+  const built: SceneNode[] = []
 
-    for (const recipe of group.items) {
-      if (existing.has(recipe.name)) {
-        result.skipped.push(recipe.name)
+  for (const group of KIT_CATALOG) {
+    const items = group.items.filter((name) => wanted === null || wanted.has(name))
+    if (items.length === 0) {
+      continue
+    }
+
+    // Só o kit inteiro ganha títulos de seção: criar avulso repetidamente encheria a página
+    // de cabeçalhos duplicados.
+    if (fullKit) {
+      await section(group.title)
+    }
+
+    for (const name of items) {
+      if (existing.has(name)) {
+        result.skipped.push(name)
         continue
       }
 
-      const node = await recipe.build(ctx)
-      node.name = recipe.name
+      const build = KIT_BUILDERS[name]
+      if (build === undefined) {
+        continue
+      }
+
+      const node = await build(ctx)
+      node.name = name
       page.appendChild(node)
       place(node)
-      existing.add(recipe.name)
-      result.created.push(recipe.name)
+      built.push(node)
+      existing.add(name)
+      result.created.push(name)
     }
   }
 
-  await buildScreenTemplate(ctx, existing)
+  if (fullKit) {
+    await buildScreenTemplate(ctx, existing)
+  }
 
   await figma.setCurrentPageAsync(page)
 
-  const focus = page.children.length > 0 ? [page.children[0]!] : []
+  // Enquadra o que acabou de ser criado; sem nada novo, o começo da página.
+  const focus = built.length > 0 ? built : page.children.length > 0 ? [page.children[0]!] : []
   if (focus.length > 0) {
     figma.viewport.scrollAndZoomIntoView(focus)
   }
 
+  if (built.length > 0) {
+    figma.currentPage.selection = built
+  }
+
   return result
+}
+
+/**
+ * Cria um componente que não está no kit canônico.
+ *
+ * O kit cobre o vocabulário compartilhado; isto cobre o resto — o `ItemSlot` de um jogo, o
+ * `Card` de outro. O componente nasce já com as layers de slot nomeadas (`$label`,
+ * `$icon`...), porque é por elas que o exportador descobre onde o importador deve escrever
+ * conteúdo. Montado à mão, sem essa nomenclatura, o componente até exporta, mas chega na
+ * Unity como uma casca que ninguém consegue preencher.
+ */
+export async function createCustomComponent(
+  rawName: string,
+  role: CustomRole,
+): Promise<KitResult> {
+  const result: KitResult = {
+    pageName: PAGE_NAME,
+    created: [],
+    skipped: [],
+    stylesCreated: 0,
+    warnings: [],
+  }
+
+  const name = normalizeCanonicalName(rawName)
+
+  if (name === null) {
+    result.warnings.push(
+      `'${rawName}' não vira um nome canônico válido. Use letras e números, com '/' para ` +
+        'agrupar — por exemplo "HUD/StatBar".',
+    )
+    return result
+  }
+
+  if (name !== rawName.trim()) {
+    result.warnings.push(`Normalizei o nome para '${name}'.`)
+  }
+
+  const fonts = await loadFonts(result)
+  const page = await findOrCreatePage(PAGE_NAME)
+
+  const ctx: Ctx = { page, fonts, colors: new Map(), texts: new Map(), result }
+
+  await ensureColorStyles(ctx)
+  await ensureTextStyles(ctx)
+
+  if (collectExistingNames(page).has(name)) {
+    result.skipped.push(name)
+    return result
+  }
+
+  const node = await buildCustom(ctx, name, role)
+  node.name = name
+  page.appendChild(node)
+
+  node.x = 0
+  node.y = bottomOf(page, 64)
+
+  result.created.push(name)
+
+  await figma.setCurrentPageAsync(page)
+  figma.viewport.scrollAndZoomIntoView([node])
+  figma.currentPage.selection = [node]
+
+  return result
+}
+
+/**
+ * Esqueleto inicial por papel.
+ *
+ * Deliberadamente simples: o designer vai redesenhar isto. O que precisa estar certo desde o
+ * começo é a estrutura que o pipeline lê — os nomes de slot e o Auto Layout —, não a
+ * aparência, que é justamente o que ele vai trocar.
+ */
+async function buildCustom(
+  ctx: Ctx,
+  name: string,
+  role: CustomRole,
+): Promise<ComponentNode> {
+  const leaf = name.split('/').pop() ?? name
+
+  switch (role) {
+    case 'button': {
+      const node = component(name, 320, 96)
+      row(node, 12, 32, 20)
+      node.cornerRadius = 20
+      node.layoutSizingHorizontal = 'HUG'
+      await surface(ctx, node, 'primary')
+
+      const iconLeft = rect('$iconLeft', 40, 40, PALETTE.text, 8)
+      iconLeft.visible = false
+      node.appendChild(iconLeft)
+
+      const label = await text(ctx, '$label', leaf, { style: 'text/button' })
+      node.appendChild(label)
+
+      const iconRight = rect('$iconRight', 40, 40, PALETTE.text, 8)
+      iconRight.visible = false
+      node.appendChild(iconRight)
+
+      const labelProperty = addProperty(node, 'label', 'TEXT', leaf, ctx.result)
+      if (labelProperty !== null) {
+        bindProperty(label, 'characters', labelProperty, ctx.result, 'label')
+      }
+
+      return node
+    }
+
+    case 'toggle': {
+      const node = component(name, 360, 64)
+      row(node, 16, 0, 0)
+      node.layoutSizingHorizontal = 'HUG'
+      node.fills = []
+
+      const box = rect('Box', 48, 48, PALETTE['surface-raised'], 10)
+      node.appendChild(box)
+
+      const check = rect('$checkmark', 28, 28, PALETTE.primary, 6)
+      node.appendChild(check)
+
+      const label = await text(ctx, '$label', leaf, { style: 'text/body', align: 'LEFT' })
+      node.appendChild(label)
+
+      return node
+    }
+
+    case 'container': {
+      const node = component(name, 600, 400)
+      column(node, 16, 32, 32)
+      node.cornerRadius = 24
+      await surface(ctx, node, 'surface')
+
+      const content = figma.createFrame()
+      content.name = '$content'
+      content.resizeWithoutConstraints(536, 336)
+      content.fills = []
+      node.appendChild(content)
+
+      return node
+    }
+
+    case 'display': {
+      const node = component(name, 320, 48)
+      row(node, 8, 0, 0)
+      node.layoutSizingHorizontal = 'HUG'
+      node.fills = []
+
+      const label = await text(ctx, '$label', leaf, { style: 'text/body', align: 'LEFT' })
+      node.appendChild(label)
+
+      return node
+    }
+
+    case 'icon': {
+      const node = component(name, 64, 64)
+      node.fills = []
+
+      const glyph = rect('$icon', 64, 64, PALETTE['text-muted'], 8)
+      node.appendChild(glyph)
+
+      return node
+    }
+
+    case 'image': {
+      const node = component(name, 240, 180)
+      node.fills = []
+
+      const art = rect('$image', 240, 180, PALETTE['surface-raised'], 12)
+      node.appendChild(art)
+
+      return node
+    }
+  }
+}
+
+/** Borda inferior do conteúdo já existente na página, com folga. Página vazia devolve 0. */
+function bottomOf(page: PageNode, gap: number): number {
+  let bottom: number | null = null
+
+  for (const child of page.children) {
+    const edge = child.y + child.height
+    if (bottom === null || edge > bottom) {
+      bottom = edge
+    }
+  }
+
+  return bottom === null ? 0 : bottom + gap * 2
 }
 
 // ----------------------------------------------------------------- infraestrutura
@@ -338,27 +550,50 @@ function solid(color: RGB): SolidPaint {
  * tentamos a async e caímos para ela — sem estilo o kit continua utilizável, só perde o
  * vínculo de token.
  */
-async function applyFillStyle(node: SceneNode & MinimalFillsMixin, style: PaintStyle): Promise<void> {
+async function applyFillStyle(
+  node: SceneNode & MinimalFillsMixin,
+  style: PaintStyle,
+  result: KitResult,
+): Promise<void> {
   try {
     await node.setFillStyleIdAsync(style.id)
+    return
   } catch {
-    try {
-      ;(node as unknown as { fillStyleId: string }).fillStyleId = style.id
-    } catch {
-      // Fica com o fill literal já aplicado.
-    }
+    // Cai para a versão sync abaixo.
+  }
+
+  try {
+    ;(node as unknown as { fillStyleId: string }).fillStyleId = style.id
+  } catch {
+    // O fill literal já foi aplicado, então a cor sai certa — o que se perde é o vínculo
+    // com o token, e com ele o aviso `hardcoded-color` no primeiro export. Silenciar isso
+    // faria o designer caçar na Unity a causa de algo que nasceu aqui.
+    result.warnings.push(
+      `Não consegui vincular '${node.name}' ao estilo de cor '${style.name}'. A cor está ` +
+        'certa, mas sem token: o export vai avisar `hardcoded-color` nessa layer.',
+    )
   }
 }
 
-async function applyTextStyle(node: TextNode, style: TextStyle): Promise<void> {
+async function applyTextStyle(
+  node: TextNode,
+  style: TextStyle,
+  result: KitResult,
+): Promise<void> {
   try {
     await node.setTextStyleIdAsync(style.id)
+    return
   } catch {
-    try {
-      ;(node as unknown as { textStyleId: string }).textStyleId = style.id
-    } catch {
-      // Mantém as métricas literais.
-    }
+    // Cai para a versão sync abaixo.
+  }
+
+  try {
+    ;(node as unknown as { textStyleId: string }).textStyleId = style.id
+  } catch {
+    result.warnings.push(
+      `Não consegui vincular '${node.name}' ao estilo de texto '${style.name}'. As métricas ` +
+        'estão certas, mas sem token: o export vai avisar `hardcoded-typography` nessa layer.',
+    )
   }
 }
 
@@ -386,7 +621,7 @@ async function text(ctx: Ctx, name: string, content: string, options: TextOption
   if (styleName !== undefined) {
     const style = ctx.texts.get(styleName)
     if (style !== undefined) {
-      await applyTextStyle(node, style)
+      await applyTextStyle(node, style, ctx.result)
     }
   }
 
@@ -402,7 +637,7 @@ async function surface(
 
   const style = ctx.colors.get(color)
   if (style !== undefined) {
-    await applyFillStyle(node, style)
+    await applyFillStyle(node, style, ctx.result)
   }
 }
 

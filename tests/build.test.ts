@@ -830,3 +830,115 @@ describe('export do pacote', () => {
     expect(result.ir!.lint).toEqual(result.bag.sorted())
   })
 })
+
+describe('condicoes de import da imagem', () => {
+  it('avisa quando a textura nao e multiplo de 4', async () => {
+    // 101x50 @2x = 202x100. 202 nao e multiplo de 4: sem isso a compressao em blocos nao se
+    // aplica e a textura ocupa varias vezes mais memoria na Unity.
+    const result = await build(
+      [
+        frame({
+          name: 'screen/HomeMenu',
+          children: [frame({ name: 'hero#img', width: 101, height: 50 })],
+        }),
+      ],
+      options,
+    )
+
+    expect(rules(result.bag.all)).toContain(RULES.assetNotMultipleOfFour)
+    expect(result.bag.hasErrors).toBe(false)
+  })
+
+  it('nao avisa quando a textura ja e multiplo de 4', async () => {
+    const result = await build(
+      [
+        frame({
+          name: 'screen/HomeMenu',
+          children: [frame({ name: 'hero#img', width: 300, height: 200 })],
+        }),
+      ],
+      options,
+    )
+
+    // NPOT de proposito (600x400): em UGUI isso nao e problema e nao vale um aviso.
+    expect(rules(result.bag.all)).not.toContain(RULES.assetNotMultipleOfFour)
+    expect(result.bag.all).toHaveLength(0)
+  })
+
+  it('avisa quando a textura passa do limite padrao da Unity', async () => {
+    const result = await build(
+      [
+        frame({
+          name: 'screen/HomeMenu',
+          width: 3000,
+          height: 3000,
+          children: [frame({ name: 'art#img', width: 1600, height: 400 })],
+        }),
+      ],
+      options,
+    )
+
+    expect(rules(result.bag.all)).toContain(RULES.assetOversized)
+  })
+})
+
+describe('9-slice no export', () => {
+  it('nao deriva borda numa tela: #img ali e ilustracao, e fatiar deformaria', async () => {
+    const result = await build(
+      [
+        frame({
+          name: 'screen/HomeMenu',
+          children: [frame({ name: 'card#img', width: 300, height: 200, cornerRadius: 24 })],
+        }),
+      ],
+      options,
+    )
+
+    expect(result.ir!.assets[0]!.nineSlice).toBeUndefined()
+  })
+
+  it('deriva borda no export de componente, onde #img e a pele do botao', async () => {
+    const result = await build(
+      [
+        frame({
+          name: 'screen/HomeMenu',
+          children: [frame({ name: 'bg#img', width: 300, height: 200, cornerRadius: 24 })],
+        }),
+      ],
+      { ...options, deriveSlices: true },
+    )
+
+    // Em px de design e em ordem CSS — exatamente o que o SpriteImporter da Unity espera.
+    expect(result.ir!.assets[0]!.nineSlice).toEqual([24, 24, 24, 24])
+    expectSchemaValid(result.ir)
+  })
+
+  it('anotacao explicita vale mesmo numa tela', async () => {
+    const result = await build(
+      [
+        frame({
+          name: 'screen/HomeMenu',
+          children: [frame({ name: 'janela#img#9s(16,16,16,16)', width: 300, height: 200 })],
+        }),
+      ],
+      options,
+    )
+
+    expect(result.ir!.assets[0]!.nineSlice).toEqual([16, 16, 16, 16])
+  })
+
+  it('avisa e reduz quando a borda anotada nao cabe', async () => {
+    const result = await build(
+      [
+        frame({
+          name: 'screen/HomeMenu',
+          children: [frame({ name: 'pill#img#9s(40)', width: 50, height: 50 })],
+        }),
+      ],
+      options,
+    )
+
+    expect(rules(result.bag.all)).toContain(RULES.nineSliceTooLarge)
+    expect(result.ir!.assets[0]!.nineSlice).toEqual([24, 24, 24, 24])
+  })
+})

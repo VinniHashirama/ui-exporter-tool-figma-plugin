@@ -154,6 +154,41 @@ export function frame(overrides: BaseOverrides = {}): SceneNode {
   return node as unknown as SceneNode
 }
 
+/**
+ * Componente. Aceita tudo o que `frame` aceita: no Figma um COMPONENT e um frame com
+ * identidade, e o traverse trata os dois do mesmo jeito.
+ */
+export function component(overrides: BaseOverrides = {}): SceneNode {
+  const node = frame(overrides) as unknown as Record<string, unknown>
+  node['type'] = 'COMPONENT'
+  return node as unknown as SceneNode
+}
+
+/** Conjunto de variantes. Os filhos precisam ser componentes nomeados `State=...`. */
+export function componentSet(overrides: BaseOverrides = {}): SceneNode {
+  const children = overrides.children ?? []
+  const node = { ...base('COMPONENT_SET', overrides), children }
+  adoptChildren(node, children)
+  return node as unknown as SceneNode
+}
+
+/**
+ * Marca o node como destino de uma propriedade de componente, como o Figma faz.
+ *
+ * O valor vem sufixado com um id interno (`label#1:23`), e o plugin precisa descascar isso —
+ * por isso o mock reproduz o sufixo em vez de guardar o nome limpo.
+ */
+export function withPropertyReference(
+  node: SceneNode,
+  key: 'characters' | 'visible',
+  propertyName: string,
+): SceneNode {
+  const target = node as unknown as Record<string, unknown>
+  const existing = (target['componentPropertyReferences'] ?? {}) as Record<string, string>
+  target['componentPropertyReferences'] = { ...existing, [key]: `${propertyName}#1:99` }
+  return node
+}
+
 export function group(overrides: BaseOverrides = {}): SceneNode {
   const children = overrides.children ?? []
   const node = { ...base('GROUP', overrides), children }
