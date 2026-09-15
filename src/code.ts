@@ -1,8 +1,11 @@
 import { isCustomRole } from './kit'
-import { createCustomComponent, createKit } from './kit-builder'
-import type { SandboxToUi, ScanResult, UiToSandbox } from './messages'
-import { parseScreenName } from './naming'
-import { build, buildComponent } from './traverse'
+import { assetPath, buildKitBatchManifest, componentPath } from './kit-batch'
+import { bottomOf, buildScreenFrame, createCustomComponent, createKit } from './kit-builder'
+import type { PackedAsset, SandboxToUi, ScanResult, UiToSandbox } from './messages'
+import { isValidScreenSuffix, parseScreenName, sanitizeName, toKebab } from './naming'
+import { hexToRgb, isCorePaletteKey, loadPalette, removePaletteColor, upsertPaletteColor } from './palette'
+import { build, buildComponent, readSource } from './traverse'
+import { PLUGIN_VERSION, SCHEMA_VERSION } from './uiir'
 
 /** @2x cobre densidade de tela mobile sem dobrar o peso do pacote como @3x faria. */
 const ASSET_SCALE = 2
@@ -220,6 +223,224 @@ async function buildCustom(name: string, role: string): Promise<void> {
   void scan()
 }
 
+/**
+ * Cria uma tela avulsa na página atual — não na página `UI Kit`, porque tela de verdade vive
+ * onde o designer está trabalhando, ao contrário dos componentes e do template do kit.
+ */
+async function createScreen(rawName: string): Promise<void> {
+  // A UI já valida antes de mandar, mas ela é outro contexto: revalidar aqui evita que um
+  // nome fora do padrão `screen/(Letra)(Letras|Dígitos|_)*` chegue a virar frame.
+  if (!isValidScreenSuffix(rawName)) {
+    post({
+      type: 'failed',
+      message:
+        `'${rawName}' não é um nome válido de tela. Comece com uma letra e use só letras, ` +
+        'números e "_" depois dela.',
+    })
+    return
+  }
+
+  const name = `screen/${rawName.trim()}`
+
+  if (figma.currentPage.children.some((node) => node.name === name)) {
+    post({ type: 'failed', message: `Já existe um frame "${name}" nesta página.` })
+    return
+  }
+
+  post({ type: 'busy', label: `Criando ${name}...` })
+
+  try {
+    const palette = await loadPalette()
+    const backgroundHex = palette.find((entry) => entry.key === 'background')?.hex
+    // `loadPalette` sempre sintetiza a chave `background`, mesmo sem estilo — então isto só
+    // falha se a paleta mudou de forma, e um valor deveria continuar existindo.
+    const background = backgroundHex !== undefined ? hexToRgb(backgroundHex) : null
+
+    const styles = await figma.getLocalPaintStylesAsync()
+    const backgroundStyle = styles.find((style) => style.name === 'color/background')
+
+    const warnings: string[] = []
+    const frame = await buildScreenFrame(
+      name,
+      background ?? { r: 0.07, g: 0.08, b: 0.12 },
+      backgroundStyle,
+      warnings,
+    )
+
+    figma.currentPage.appendChild(frame)
+    frame.x = 0
+    frame.y = bottomOf(figma.currentPage, 64)
+
+    figma.currentPage.selection = [frame]
+    figma.viewport.scrollAndZoomIntoView([frame])
+  } catch (error) {
+    post({ type: 'failed', message: describeError(error) })
+    return
+  }
+
+  // Mesmo motivo do buildKit/buildCustom: a nova tela virou a seleção, e a UI precisa do
+  // relatório dela em vez de continuar mostrando "nenhuma tela selecionada".
+  void scan()
+}
+
+async function getPalette(): Promise<void> {
+  try {
+    const colors = await loadPalette()
+    post({ type: 'palette', colors })
+  } catch (error) {
+    post({ type: 'failed', message: describeError(error) })
+  }
+}
+
+async function setColor(key: string, hex: string): Promise<void> {
+  if (hexToRgb(hex) === null) {
+    post({ type: 'failed', message: `'${hex}' não é uma cor hexadecimal válida. Use o formato #rrggbb.` })
+    return
+  }
+
+  try {
+    await upsertPaletteColor(key, hex)
+    await getPalette()
+  } catch (error) {
+    post({ type: 'failed', message: describeError(error) })
+  }
+}
+
+async function addColor(rawName: string, hex: string): Promise<void> {
+  const key = toKebab(rawName)
+
+  if (key.length === 0) {
+    post({ type: 'failed', message: 'Dê um nome à cor, por exemplo "hud-danger".' })
+    return
+  }
+
+  if (hexToRgb(hex) === null) {
+    post({ type: 'failed', message: `'${hex}' não é uma cor hexadecimal válida. Use o formato #rrggbb.` })
+    return
+  }
+
+  if (isCorePaletteKey(key)) {
+    post({
+      type: 'failed',
+      message: `'${key}' já é uma cor base do kit. Use o campo dela na lista para recolorir.`,
+    })
+    return
+  }
+
+  const existing = await loadPalette()
+  if (existing.some((entry) => entry.key === key)) {
+    post({ type: 'failed', message: `Já existe uma cor '${key}'.` })
+    return
+  }
+
+  try {
+    await upsertPaletteColor(key, hex)
+    await getPalette()
+  } catch (error) {
+    post({ type: 'failed', message: describeError(error) })
+  }
+}
+
+async function removeColor(key: string): Promise<void> {
+  if (isCorePaletteKey(key)) {
+    post({ type: 'failed', message: 'Cores base não podem ser removidas, só recoloridas.' })
+    return
+  }
+
+  try {
+    await removePaletteColor(key)
+    await getPalette()
+  } catch (error) {
+    post({ type: 'failed', message: describeError(error) })
+  }
+}
+
+/**
+ * Exporta todo componente de primeiro nível da página atual num só pacote `.uikitset`, pra a
+ * Unity atualizar o kit inteiro de uma vez e manter os componentes em sincronia entre si.
+ *
+ * Só nós de primeiro nível: igual ao `collectExistingNames` do kit-builder, instância e
+ * componente aninhado dentro de outro não contam — senão o mesmo componente apareceria
+ * exportado mais de uma vez.
+ */
+async function exportKitBatch(): Promise<void> {
+  const page = figma.currentPage
+  const candidates = page.children.filter(
+    (node): node is ComponentNode | ComponentSetNode =>
+      node.type === 'COMPONENT' || node.type === 'COMPONENT_SET',
+  )
+
+  if (candidates.length === 0) {
+    post({ type: 'failed', message: 'Nenhum componente exportável nesta página.' })
+    return
+  }
+
+  post({ type: 'busy', label: `Exportando ${candidates.length} componente(s)...` })
+
+  const components: { canonicalName: string }[] = []
+  const componentFiles: { path: string; json: string }[] = []
+  const assets: PackedAsset[] = []
+  const skipped: { name: string; reason: string }[] = []
+
+  try {
+    for (const node of candidates) {
+      const result = await buildComponent([node], {
+        exportAssets: true,
+        assetScale: ASSET_SCALE,
+        deriveSlices: true,
+      })
+
+      if (result.ir === null || result.canonicalName === null || result.bag.hasErrors) {
+        const firstError = result.bag.sorted().find((item) => item.severity === 'error')
+        skipped.push({
+          name: result.canonicalName ?? node.name,
+          reason: firstError?.message ?? 'Não foi possível exportar este componente.',
+        })
+        continue
+      }
+
+      const canonicalName = result.canonicalName
+      components.push({ canonicalName })
+      componentFiles.push({
+        path: componentPath(canonicalName),
+        json: JSON.stringify(result.ir, null, 2),
+      })
+
+      for (const asset of result.assets) {
+        assets.push({ path: assetPath(canonicalName, asset.path), bytes: asset.bytes })
+      }
+    }
+  } catch (error) {
+    post({ type: 'failed', message: describeError(error) })
+    return
+  }
+
+  if (components.length === 0) {
+    post({ type: 'failed', message: 'Nenhum componente exportável nesta página.' })
+    return
+  }
+
+  const source = readSource()
+  const manifest = buildKitBatchManifest(
+    { fileKey: source.fileKey, fileName: source.fileName, pageName: page.name },
+    SCHEMA_VERSION,
+    PLUGIN_VERSION,
+    new Date().toISOString(),
+    components,
+    skipped,
+  )
+
+  post({
+    type: 'kit-batch-ready',
+    payload: {
+      fileName: `${sanitizeName(page.name)}.uikitset`,
+      manifestJson: JSON.stringify(manifest, null, 2),
+      components: componentFiles,
+      assets,
+    },
+  })
+}
+
 figma.ui.onmessage = (message: UiToSandbox): void => {
   switch (message.type) {
     case 'rescan':
@@ -236,6 +457,24 @@ figma.ui.onmessage = (message: UiToSandbox): void => {
       break
     case 'create-component':
       void buildCustom(message.name, message.role)
+      break
+    case 'create-screen':
+      void createScreen(message.name)
+      break
+    case 'get-palette':
+      void getPalette()
+      break
+    case 'set-color':
+      void setColor(message.key, message.hex)
+      break
+    case 'add-color':
+      void addColor(message.name, message.hex)
+      break
+    case 'remove-color':
+      void removeColor(message.key)
+      break
+    case 'export-kit-batch':
+      void exportKitBatch()
       break
     case 'select-node':
       void revealNode(message.nodeId)
@@ -265,6 +504,7 @@ figma.on('selectionchange', () => {
 })
 
 void scan()
+void getPalette()
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error)

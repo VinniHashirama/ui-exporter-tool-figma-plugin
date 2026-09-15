@@ -924,7 +924,7 @@ function readScaleMode(node: SceneNode, flatten: boolean): 'FILL' | 'FIT' | 'STR
   return 'FIT'
 }
 
-function readSource(): Source {
+export function readSource(): Source {
   let fileKey = 'local'
   try {
     // fileKey pode nao estar disponivel dependendo do contexto de execucao.

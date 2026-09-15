@@ -9,10 +9,21 @@ recusa pacote de major diferente do que ele suporta.
 ## [Não publicado]
 
 Autoria de componente no Figma. O designer monta o botão e a Unity gera o prefab com a arte
-dele, em vez de uma caixa cinza.
+dele, em vez de uma caixa cinza. Nesta leva também a UI do plugin foi reorganizada: criar e
+exportar viraram dois modos separados, em vez de uma fileira só de abas misturando os dois.
 
 ### Adicionado
 
+- **Criar tela**: cria um frame `screen/Nome` avulso na página atual, sem passar pelo "criar
+  kit inteiro" — tela não é componente neste fluxo, e o antigo único caminho era duplicar o
+  template `screen/Exemplo` da página `UI Kit`.
+- **Aba Cores**: paleta do kit editável, com a verdade nos Paint Styles `color/<chave>` do
+  arquivo em vez de constante do código. Editar uma cor aqui reflete sozinho em qualquer
+  componente já vinculado ao estilo — Paint Style propaga por conta própria. Dá para recolorir
+  as 8 cores centrais e adicionar/remover cores próprias; as centrais só recolorem, não somem.
+- **Exportar kit completo** (`.uikitset`): empacota todo componente de primeiro nível da página
+  atual num zip só, com `kitset.json` na raiz listando cada um e seus `skipped[]`. Complementa
+  o `.uikit` avulso — este é para sincronizar o kit inteiro de uma vez do lado da Unity.
 - **Export de componente** para pacote `.uikit` (`kit.json` + PNGs), `schemaVersion` **1.1.0**.
   Carrega nome canônico, papel, slots e a variante de origem.
 - **Criar componente avulso** na aba Criar kit, com um botão por componente do catálogo, além
@@ -25,12 +36,45 @@ dele, em vez de uma caixa cinza.
 - Lint de dimensão de textura: `asset-not-multiple-of-4` e `asset-oversized`.
 - Sample de componente (`samples/Button_Primary.uikit`), reproduzível byte a byte.
 
+### Alterado
+
+- **Abas viraram dois modos.** Criar e exportar são tarefas diferentes, e misturadas numa
+  fileira só de abas uma bagunçava a outra. Agora tem uma fileira de modo (**Criação** /
+  **Exportação**) e, dentro de cada um, a fileira de aba de sempre: Criação = Tela, Componentes,
+  Cores; Exportação = Tela, Componente, Kit completo. Escolher um modo volta pra aba onde o
+  designer parou nele.
+- Aba **Criar kit** virou **Componentes**, dentro do modo Criação: o botão "Criar kit nesta
+  página" saiu do rodapé, perdeu o destaque `.primary` e foi para um `<details>` recolhido
+  ("Avançado: criar kit completo") no fim do painel. O uso real é ir componente por componente —
+  o botão de criação individual continua igual, e é ele que fica em destaque agora.
+- **Criar tela** e **Exportar kit completo** ganharam aba própria (Criação > Tela e Exportação >
+  Kit completo, respectivamente) em vez de morarem dentro do painel de outra coisa.
+- Dentro de **Criação > Componentes**, **Componente próprio** subiu para o topo do painel — é o
+  caminho mais usado — e **Componentes do kit** (a lista do catálogo, um "Criar" por item) virou
+  um `<details>` recolhido, junto do "Avançado: criar kit completo".
+- **Paleta com seletor de cor nativo**: cada linha da aba Cores, e o formulário de cor nova, têm
+  um `input[type=color]` de verdade ao lado do campo de hex — clique abre o seletor do sistema, e
+  os dois campos ficam sincronizados nos dois sentidos. Salvar continua exigindo o botão
+  explícito; escolher a cor só atualiza o preview.
+- `ensureColorStyles` (`kit-builder.ts`) parou de sobrescrever `color/<chave>` a partir de uma
+  constante a cada build; agora lê a paleta de verdade (`palette.ts`) e só cria o que falta —
+  o que o designer editou na aba Cores fica de pé.
+
 ### Corrigido
 
 - `applyFillStyle` e `applyTextStyle` engoliam a falha em silêncio, e o kit saía sem vínculo
   de token sem ninguém saber. Agora entram na lista de avisos explicando o efeito.
 - A lista de componentes da UI era um `<ul>` escrito à mão que podia divergir do que o botão
   realmente cria. Agora é derivada do mesmo catálogo, com teste cobrando.
+- **Esconder a fileira de sub-abas errada não funcionava.** `.tabs` fixa `display: flex`, e essa
+  regra de autor empata em especificidade com o `display: none` padrão do atributo `hidden` do
+  navegador — e regra de autor sempre ganha da regra padrão. As duas fileiras de sub-aba
+  (Criação/Exportação) ficavam empilhadas visíveis ao trocar de modo. Adicionado `.tabs[hidden]`.
+- **Formulário de cor nova estourava a linha.** `.custom-form input { width: 100% }` alcança
+  qualquer input dentro do form, inclusive o `input[type=color]` novo — o quadrado de cor
+  esticava para a largura da fileira toda, empurrando o campo de hex para fora e abrindo rolagem
+  horizontal. Corrigido dando a cada campo da fileira (cor, nome, hex) uma regra própria e mais
+  específica dizendo o que é fixo e o que cresce.
 
 ### Decisões
 
@@ -39,6 +83,11 @@ dele, em vez de uma caixa cinza.
   relatório de ruído e mataria a meta de exportar com zero avisos.
 - **9-slice não é derivado em tela.** Ali `#img` marca ilustração, que fatiada sairia
   deformada. Num componente, `#img` é a pele do botão — o caso em que a borda importa.
+- **`.uikitset` não tem teste com Figma real.** `hexToRgb`/`rgbToHex` e a montagem do
+  `kitset.json` (`kit-batch.ts`) são puros e têm teste; `loadPalette`/`upsertPaletteColor` e o
+  laço de `exportKitBatch` sobre `figma.currentPage` dependem de Paint Style e de
+  `buildComponent` de verdade, caros demais para simular em `figma-mock.ts` — cobertos por QA
+  manual no Figma.
 
 ## [0.1.0] — 2026-08-19
 

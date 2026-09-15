@@ -14,6 +14,8 @@
 import { KIT_CATALOG } from './kit'
 import type { CustomRole } from './kit'
 import { normalizeCanonicalName } from './naming'
+import { CORE_PALETTE_KEYS, DEFAULT_PALETTE, hexToRgb, loadPalette, upsertPaletteColor } from './palette'
+import type { CorePaletteKey } from './palette'
 
 const PAGE_NAME = 'UI Kit'
 
@@ -25,19 +27,15 @@ const MEDIUM_CANDIDATES = ['Medium', 'Regular']
 const SEMIBOLD_CANDIDATES = ['Semi Bold', 'SemiBold', 'Medium', 'Bold']
 const BOLD_CANDIDATES = ['Bold', 'Semi Bold', 'Medium']
 
-/** Mesmos valores do UIKitFactory da Unity. */
-const PALETTE = {
-  background: { r: 0.07, g: 0.08, b: 0.12 },
-  surface: { r: 0.16, g: 0.17, b: 0.22 },
-  'surface-raised': { r: 0.22, g: 0.23, b: 0.29 },
-  primary: { r: 0.05, g: 0.6, b: 1 },
-  'primary-muted': { r: 0.3, g: 0.33, b: 0.4 },
-  text: { r: 0.95, g: 0.96, b: 0.98 },
-  'text-muted': { r: 0.62, g: 0.65, b: 0.72 },
-  track: { r: 0.12, g: 0.13, b: 0.17 },
-} as const
-
-type PaletteKey = keyof typeof PALETTE
+/**
+ * As 8 chaves de cor que os construtores abaixo referenciam por nome.
+ *
+ * O valor de cada uma não é mais constante — vem dos Paint Styles `color/<key>` do arquivo
+ * (`palette.ts`), que a aba Cores deixa o designer editar. `ensureColorStyles` resolve um
+ * snapshot RGB destas chaves no início de cada criação, pra estas funções continuarem
+ * recebendo um valor pronto em vez de terem que ler estilo uma a uma.
+ */
+type PaletteKey = CorePaletteKey
 
 export interface KitResult {
   pageName: string
@@ -91,6 +89,8 @@ interface Fonts {
 interface Ctx {
   page: PageNode
   fonts: Fonts
+  /** Snapshot resolvido pelo `ensureColorStyles` no início da criação. */
+  palette: Record<PaletteKey, RGB>
   colors: Map<PaletteKey, PaintStyle>
   texts: Map<string, TextStyle>
   result: KitResult
@@ -130,6 +130,7 @@ export async function createKit(only?: readonly string[]): Promise<KitResult> {
   const ctx: Ctx = {
     page,
     fonts,
+    palette: {} as Record<PaletteKey, RGB>,
     colors: new Map(),
     texts: new Map(),
     result,
@@ -171,7 +172,7 @@ export async function createKit(only?: readonly string[]): Promise<KitResult> {
     heading.fontName = ctx.fonts.bold
     heading.characters = title
     heading.fontSize = 48
-    heading.fills = [solid(PALETTE['text-muted'])]
+    heading.fills = [solid(ctx.palette['text-muted'])]
     heading.x = 0
     heading.y = layout.y
     page.appendChild(heading)
@@ -276,7 +277,14 @@ export async function createCustomComponent(
   const fonts = await loadFonts(result)
   const page = await findOrCreatePage(PAGE_NAME)
 
-  const ctx: Ctx = { page, fonts, colors: new Map(), texts: new Map(), result }
+  const ctx: Ctx = {
+    page,
+    fonts,
+    palette: {} as Record<PaletteKey, RGB>,
+    colors: new Map(),
+    texts: new Map(),
+    result,
+  }
 
   await ensureColorStyles(ctx)
   await ensureTextStyles(ctx)
@@ -324,14 +332,14 @@ async function buildCustom(
       node.layoutSizingHorizontal = 'HUG'
       await surface(ctx, node, 'primary')
 
-      const iconLeft = rect('$iconLeft', 40, 40, PALETTE.text, 8)
+      const iconLeft = rect('$iconLeft', 40, 40, ctx.palette.text, 8)
       iconLeft.visible = false
       node.appendChild(iconLeft)
 
       const label = await text(ctx, '$label', leaf, { style: 'text/button' })
       node.appendChild(label)
 
-      const iconRight = rect('$iconRight', 40, 40, PALETTE.text, 8)
+      const iconRight = rect('$iconRight', 40, 40, ctx.palette.text, 8)
       iconRight.visible = false
       node.appendChild(iconRight)
 
@@ -349,10 +357,10 @@ async function buildCustom(
       node.layoutSizingHorizontal = 'HUG'
       node.fills = []
 
-      const box = rect('Box', 48, 48, PALETTE['surface-raised'], 10)
+      const box = rect('Box', 48, 48, ctx.palette['surface-raised'], 10)
       node.appendChild(box)
 
-      const check = rect('$checkmark', 28, 28, PALETTE.primary, 6)
+      const check = rect('$checkmark', 28, 28, ctx.palette.primary, 6)
       node.appendChild(check)
 
       const label = await text(ctx, '$label', leaf, { style: 'text/body', align: 'LEFT' })
@@ -392,7 +400,7 @@ async function buildCustom(
       const node = component(name, 64, 64)
       node.fills = []
 
-      const glyph = rect('$icon', 64, 64, PALETTE['text-muted'], 8)
+      const glyph = rect('$icon', 64, 64, ctx.palette['text-muted'], 8)
       node.appendChild(glyph)
 
       return node
@@ -402,7 +410,7 @@ async function buildCustom(
       const node = component(name, 240, 180)
       node.fills = []
 
-      const art = rect('$image', 240, 180, PALETTE['surface-raised'], 12)
+      const art = rect('$image', 240, 180, ctx.palette['surface-raised'], 12)
       node.appendChild(art)
 
       return node
@@ -411,7 +419,7 @@ async function buildCustom(
 }
 
 /** Borda inferior do conteúdo já existente na página, com folga. Página vazia devolve 0. */
-function bottomOf(page: PageNode, gap: number): number {
+export function bottomOf(page: PageNode, gap: number): number {
   let bottom: number | null = null
 
   for (const child of page.children) {
@@ -486,25 +494,38 @@ function collectExistingNames(page: PageNode): Set<string> {
   return names
 }
 
+/**
+ * Resolve `ctx.palette` (RGB, para os construtores) e `ctx.colors` (os Paint Styles, para
+ * vincular fill a token) a partir da paleta de verdade do arquivo (`palette.ts`), criando só
+ * as chaves centrais que ainda não têm estilo — nunca sobrescrevendo o que o designer já
+ * editou na aba Cores.
+ */
 async function ensureColorStyles(ctx: Ctx): Promise<void> {
-  const existing = new Map<string, PaintStyle>()
+  const entries = await loadPalette()
+  const byKey = new Map(entries.map((entry) => [entry.key, entry]))
 
-  for (const style of await figma.getLocalPaintStylesAsync()) {
-    existing.set(style.name, style)
-  }
+  const palette = {} as Record<PaletteKey, RGB>
 
-  for (const key of Object.keys(PALETTE) as PaletteKey[]) {
-    const name = `color/${key}`
-    let style = existing.get(name)
+  for (const key of CORE_PALETTE_KEYS) {
+    const entry = byKey.get(key)
+    const hex = entry?.hex ?? DEFAULT_PALETTE[key]
 
-    if (style === undefined) {
-      style = figma.createPaintStyle()
-      style.name = name
+    if (entry === undefined || !entry.exists) {
+      await upsertPaletteColor(key, hex)
       ctx.result.stylesCreated++
     }
 
-    style.paints = [solid(PALETTE[key])]
-    ctx.colors.set(key, style)
+    palette[key] = hexToRgb(hex) ?? hexToRgb(DEFAULT_PALETTE[key])!
+  }
+
+  ctx.palette = palette
+
+  for (const style of await figma.getLocalPaintStylesAsync()) {
+    if (!style.name.startsWith('color/')) continue
+    const key = style.name.slice('color/'.length)
+    if ((CORE_PALETTE_KEYS as readonly string[]).includes(key)) {
+      ctx.colors.set(key as PaletteKey, style)
+    }
   }
 }
 
@@ -553,7 +574,7 @@ function solid(color: RGB): SolidPaint {
 async function applyFillStyle(
   node: SceneNode & MinimalFillsMixin,
   style: PaintStyle,
-  result: KitResult,
+  warnings: string[],
 ): Promise<void> {
   try {
     await node.setFillStyleIdAsync(style.id)
@@ -568,7 +589,7 @@ async function applyFillStyle(
     // O fill literal já foi aplicado, então a cor sai certa — o que se perde é o vínculo
     // com o token, e com ele o aviso `hardcoded-color` no primeiro export. Silenciar isso
     // faria o designer caçar na Unity a causa de algo que nasceu aqui.
-    result.warnings.push(
+    warnings.push(
       `Não consegui vincular '${node.name}' ao estilo de cor '${style.name}'. A cor está ` +
         'certa, mas sem token: o export vai avisar `hardcoded-color` nessa layer.',
     )
@@ -578,7 +599,7 @@ async function applyFillStyle(
 async function applyTextStyle(
   node: TextNode,
   style: TextStyle,
-  result: KitResult,
+  warnings: string[],
 ): Promise<void> {
   try {
     await node.setTextStyleIdAsync(style.id)
@@ -590,7 +611,7 @@ async function applyTextStyle(
   try {
     ;(node as unknown as { textStyleId: string }).textStyleId = style.id
   } catch {
-    result.warnings.push(
+    warnings.push(
       `Não consegui vincular '${node.name}' ao estilo de texto '${style.name}'. As métricas ` +
         'estão certas, mas sem token: o export vai avisar `hardcoded-typography` nessa layer.',
     )
@@ -615,13 +636,13 @@ async function text(ctx: Ctx, name: string, content: string, options: TextOption
   node.fontSize = options.size ?? 28
   node.textAlignHorizontal = options.align ?? 'CENTER'
   node.textAlignVertical = 'CENTER'
-  node.fills = [solid(PALETTE[options.color ?? 'text'])]
+  node.fills = [solid(ctx.palette[options.color ?? 'text'])]
 
   const styleName = options.style
   if (styleName !== undefined) {
     const style = ctx.texts.get(styleName)
     if (style !== undefined) {
-      await applyTextStyle(node, style, ctx.result)
+      await applyTextStyle(node, style, ctx.result.warnings)
     }
   }
 
@@ -633,11 +654,11 @@ async function surface(
   node: SceneNode & MinimalFillsMixin,
   color: PaletteKey,
 ): Promise<void> {
-  node.fills = [solid(PALETTE[color])]
+  node.fills = [solid(ctx.palette[color])]
 
   const style = ctx.colors.get(color)
   if (style !== undefined) {
-    await applyFillStyle(node, style, ctx.result)
+    await applyFillStyle(node, style, ctx.result.warnings)
   }
 }
 
@@ -864,7 +885,7 @@ async function buildTextButton(ctx: Ctx, color: PaletteKey): Promise<ComponentSe
     await surface(ctx, variant, state === 'Disabled' ? 'primary-muted' : color)
     variant.opacity = state === 'Disabled' ? 0.5 : 1
 
-    const iconLeft = rect('IconLeft', 40, 40, PALETTE.text, 8)
+    const iconLeft = rect('IconLeft', 40, 40, ctx.palette.text, 8)
     iconLeft.visible = false
     variant.appendChild(iconLeft)
     iconsLeft.push(iconLeft)
@@ -873,7 +894,7 @@ async function buildTextButton(ctx: Ctx, color: PaletteKey): Promise<ComponentSe
     variant.appendChild(label)
     labels.push(label)
 
-    const iconRight = rect('IconRight', 40, 40, PALETTE.text, 8)
+    const iconRight = rect('IconRight', 40, 40, ctx.palette.text, 8)
     iconRight.visible = false
     variant.appendChild(iconRight)
     iconsRight.push(iconRight)
@@ -917,7 +938,7 @@ async function buildIconButton(ctx: Ctx): Promise<ComponentSetNode> {
     await surface(ctx, variant, 'primary-muted')
     variant.opacity = state === 'Disabled' ? 0.5 : 1
 
-    const icon = rect('Icon', 56, 56, PALETTE.text, 8)
+    const icon = rect('Icon', 56, 56, ctx.palette.text, 8)
     variant.appendChild(icon)
 
     variants.push(variant)
@@ -947,7 +968,7 @@ async function buildCheckbox(ctx: Ctx): Promise<ComponentSetNode> {
     await surface(ctx, box, 'track')
     variant.appendChild(box)
 
-    const checkmark = rect('Checkmark', 28, 28, PALETTE.primary, 6)
+    const checkmark = rect('Checkmark', 28, 28, ctx.palette.primary, 6)
     checkmark.visible = checked === 'On'
     box.appendChild(checkmark)
 
@@ -974,12 +995,12 @@ async function buildSlider(ctx: Ctx): Promise<ComponentNode> {
   const node = component('Slider', 400, 48)
   node.fills = []
 
-  const track = rect('Background', 400, 12, PALETTE.track, 6)
+  const track = rect('Background', 400, 12, ctx.palette.track, 6)
   track.y = 18
   node.appendChild(track)
   await surface(ctx, track, 'track')
 
-  const fill = rect('Fill', 200, 12, PALETTE.primary, 6)
+  const fill = rect('Fill', 200, 12, ctx.palette.primary, 6)
   fill.y = 18
   node.appendChild(fill)
   await surface(ctx, fill, 'primary')
@@ -989,7 +1010,7 @@ async function buildSlider(ctx: Ctx): Promise<ComponentNode> {
   handle.resizeWithoutConstraints(44, 44)
   handle.x = 178
   handle.y = 2
-  handle.fills = [solid(PALETTE.text)]
+  handle.fills = [solid(ctx.palette.text)]
   node.appendChild(handle)
 
   return node
@@ -1037,7 +1058,7 @@ async function buildIcon(ctx: Ctx): Promise<ComponentNode> {
   const node = component('Icon', 64, 64)
   node.fills = []
 
-  const glyph = rect('Glyph', 64, 64, PALETTE.text, 12)
+  const glyph = rect('Glyph', 64, 64, ctx.palette.text, 12)
   node.appendChild(glyph)
   await surface(ctx, glyph, 'text')
 
@@ -1048,7 +1069,7 @@ async function buildImage(ctx: Ctx): Promise<ComponentNode> {
   const node = component('Image', 240, 180)
   node.fills = []
 
-  const placeholder = rect('Placeholder', 240, 180, PALETTE['surface-raised'], 12)
+  const placeholder = rect('Placeholder', 240, 180, ctx.palette['surface-raised'], 12)
   node.appendChild(placeholder)
 
   const hint = await text(ctx, 'Hint', 'imagem', {
@@ -1066,11 +1087,11 @@ async function buildProgressBar(ctx: Ctx): Promise<ComponentNode> {
   const node = component('ProgressBar', 400, 32)
   node.fills = []
 
-  const track = rect('Background', 400, 32, PALETTE.track, 16)
+  const track = rect('Background', 400, 32, ctx.palette.track, 16)
   node.appendChild(track)
   await surface(ctx, track, 'track')
 
-  const fill = rect('Fill', 240, 32, PALETTE.primary, 16)
+  const fill = rect('Fill', 240, 32, ctx.palette.primary, 16)
   node.appendChild(fill)
   await surface(ctx, fill, 'primary')
 
@@ -1103,6 +1124,45 @@ async function buildTabs(ctx: Ctx): Promise<ComponentNode> {
 
 // ------------------------------------------------------------- template e swatches
 
+/** Canvas fixo de tela mobile, igual nos dois lados do contrato. */
+export const SCREEN_WIDTH = 1080
+export const SCREEN_HEIGHT = 1920
+const SAFE_AREA_INSET = 80
+
+/**
+ * Geometria compartilhada de todo frame de tela: canvas fixo com a SafeArea dentro.
+ *
+ * Usada tanto pelo template do kit inteiro (`buildScreenTemplate`, que ainda desenha a dica
+ * de uso por cima) quanto pela criação avulsa de tela (`code.ts`, sem essa dica — ali o frame
+ * já nasce pronto pro designer desenhar dentro, não pra ser duplicado).
+ */
+export async function buildScreenFrame(
+  name: string,
+  background: RGB,
+  backgroundStyle: PaintStyle | undefined,
+  warnings: string[],
+): Promise<FrameNode> {
+  const screen = figma.createFrame()
+  screen.name = name
+  screen.resizeWithoutConstraints(SCREEN_WIDTH, SCREEN_HEIGHT)
+  screen.fills = [solid(background)]
+  if (backgroundStyle !== undefined) {
+    await applyFillStyle(screen, backgroundStyle, warnings)
+  }
+  screen.clipsContent = true
+
+  const safeArea = figma.createFrame()
+  safeArea.name = 'SafeArea'
+  safeArea.resizeWithoutConstraints(SCREEN_WIDTH, SCREEN_HEIGHT - SAFE_AREA_INSET * 2)
+  safeArea.x = 0
+  safeArea.y = SAFE_AREA_INSET
+  safeArea.fills = []
+  safeArea.constraints = { horizontal: 'STRETCH', vertical: 'STRETCH' }
+  screen.appendChild(safeArea)
+
+  return screen
+}
+
 /**
  * O `Screen` do kit da Unity é o prefab de Canvas para teste isolado; no Figma o
  * equivalente não é um componente, é a convenção de nome do frame. Então em vez de um
@@ -1117,25 +1177,19 @@ async function buildScreenTemplate(ctx: Ctx, existing: Set<string>): Promise<voi
     return
   }
 
-  const screen = figma.createFrame()
-  screen.name = name
-  screen.resizeWithoutConstraints(1080, 1920)
-  await surface(ctx, screen, 'background')
-  screen.clipsContent = true
+  const screen = await buildScreenFrame(
+    name,
+    ctx.palette.background,
+    ctx.colors.get('background'),
+    ctx.result.warnings,
+  )
 
   // Longe da coluna de componentes, para não abrir um vão gigante no layout da página.
   screen.x = 1700
   screen.y = 0
   ctx.page.appendChild(screen)
 
-  const safeArea = figma.createFrame()
-  safeArea.name = 'SafeArea'
-  safeArea.resizeWithoutConstraints(1080, 1760)
-  safeArea.x = 0
-  safeArea.y = 80
-  safeArea.fills = []
-  safeArea.constraints = { horizontal: 'STRETCH', vertical: 'STRETCH' }
-  screen.appendChild(safeArea)
+  const safeArea = screen.children[0] as FrameNode
 
   const hint = await text(
     ctx,
@@ -1164,8 +1218,8 @@ function placeSwatches(ctx: Ctx, place: (node: SceneNode) => void): void {
   group.fills = []
   group.resizeWithoutConstraints(1200, 120)
 
-  for (const key of Object.keys(PALETTE) as PaletteKey[]) {
-    const swatch = rect(`color/${key}`, 120, 120, PALETTE[key], 16)
+  for (const key of CORE_PALETTE_KEYS) {
+    const swatch = rect(`color/${key}`, 120, 120, ctx.palette[key], 16)
     group.appendChild(swatch)
   }
 

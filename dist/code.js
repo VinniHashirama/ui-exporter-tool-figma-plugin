@@ -48,6 +48,30 @@
   }
   var LABEL_PROPERTY_NAMES = ["label", "text", "title", "caption"];
 
+  // src/kit-batch.ts
+  function slugFor(canonicalName) {
+    return canonicalName.split("/").join("_");
+  }
+  function componentPath(canonicalName) {
+    return `components/${slugFor(canonicalName)}/kit.json`;
+  }
+  function assetPath(canonicalName, assetFile) {
+    return `components/${slugFor(canonicalName)}/${assetFile}`;
+  }
+  function buildKitBatchManifest(source, schemaVersion, pluginVersion, generatedAt, components, skipped) {
+    return {
+      schemaVersion,
+      pluginVersion,
+      generatedAt,
+      source,
+      components: components.map((component2) => ({
+        canonicalName: component2.canonicalName,
+        path: componentPath(component2.canonicalName)
+      })),
+      skipped: [...skipped]
+    };
+  }
+
   // src/naming.ts
   var LOC_SUFFIX = /:([A-Za-z0-9_.-]+)$/;
   var IMG_SUFFIX = /#img$/i;
@@ -116,6 +140,9 @@
   function parseScreenName(raw) {
     return raw.trim().match(SCREEN_PREFIX)?.[1] ?? null;
   }
+  function isValidScreenSuffix(raw) {
+    return /^[A-Za-z][A-Za-z0-9_]*$/.test(raw.trim());
+  }
   function sanitizeName(raw) {
     const cleaned = raw.replace(DISALLOWED_NAME_CHARS, " ").replace(/\s+/g, " ").trim().replace(/[.\s]+$/, "").slice(0, MAX_NAME_LENGTH).trim();
     return cleaned.length > 0 ? cleaned : "Node";
@@ -144,8 +171,8 @@
   function toKebab(raw) {
     return raw.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   }
-  function toTokenRef(styleName) {
-    const ref = styleName.trim().replace(/\s*\/\s*/g, ".").replace(/\s+/g, "-").replace(/[^A-Za-z0-9_.-]+/g, "").replace(/^[.-]+|[.-]+$/g, "");
+  function toTokenRef(styleName2) {
+    const ref = styleName2.trim().replace(/\s*\/\s*/g, ".").replace(/\s+/g, "-").replace(/[^A-Za-z0-9_.-]+/g, "").replace(/^[.-]+|[.-]+$/g, "");
     return ref.length > 0 ? ref : null;
   }
   var DEFAULT_NAME_NUMBERED = /^(frame|group|rectangle|ellipse|line|star|polygon|component|instance|slice|text|image)\s+\d+$/i;
@@ -164,6 +191,92 @@
     return raw.trim().split(/[\s_-]+/).map((word) => word.replace(/[^A-Za-z0-9]/g, "")).filter((word) => word.length > 0).map((word) => /^[A-Z]/.test(word) ? word : word[0].toUpperCase() + word.slice(1)).join("");
   }
 
+  // src/palette.ts
+  var STYLE_PREFIX = "color/";
+  var CORE_PALETTE_KEYS = [
+    "background",
+    "surface",
+    "surface-raised",
+    "primary",
+    "primary-muted",
+    "text",
+    "text-muted",
+    "track"
+  ];
+  var CORE_PALETTE_SET = new Set(CORE_PALETTE_KEYS);
+  function isCorePaletteKey(key) {
+    return CORE_PALETTE_SET.has(key);
+  }
+  var DEFAULT_PALETTE = {
+    background: "#12141f",
+    surface: "#292b38",
+    "surface-raised": "#383b4a",
+    primary: "#0d99ff",
+    "primary-muted": "#4d5466",
+    text: "#f2f5fa",
+    "text-muted": "#9ea6b8",
+    track: "#1f212b"
+  };
+  var HEX_PATTERN = /^#[0-9a-fA-F]{6}$/;
+  function hexToRgb(hex) {
+    if (!HEX_PATTERN.test(hex)) return null;
+    return {
+      r: parseInt(hex.slice(1, 3), 16) / 255,
+      g: parseInt(hex.slice(3, 5), 16) / 255,
+      b: parseInt(hex.slice(5, 7), 16) / 255
+    };
+  }
+  function rgbToHex(rgb) {
+    const channel2 = (value) => Math.round(Math.min(1, Math.max(0, value)) * 255).toString(16).padStart(2, "0");
+    return `#${channel2(rgb.r)}${channel2(rgb.g)}${channel2(rgb.b)}`;
+  }
+  function styleName(key) {
+    return `${STYLE_PREFIX}${key}`;
+  }
+  function firstSolidHex(style) {
+    const paint = style.paints.find((item) => item.type === "SOLID");
+    return paint === void 0 ? null : rgbToHex(paint.color);
+  }
+  async function findColorStyle(key) {
+    const name = styleName(key);
+    const styles = await figma.getLocalPaintStylesAsync();
+    return styles.find((style) => style.name === name);
+  }
+  async function loadPalette() {
+    const entries = /* @__PURE__ */ new Map();
+    for (const style of await figma.getLocalPaintStylesAsync()) {
+      if (!style.name.startsWith(STYLE_PREFIX)) continue;
+      const key = style.name.slice(STYLE_PREFIX.length);
+      if (key.length === 0) continue;
+      const hex = firstSolidHex(style);
+      if (hex === null) continue;
+      entries.set(key, { key, hex, core: isCorePaletteKey(key), exists: true });
+    }
+    for (const key of CORE_PALETTE_KEYS) {
+      if (!entries.has(key)) {
+        entries.set(key, { key, hex: DEFAULT_PALETTE[key], core: true, exists: false });
+      }
+    }
+    const core = CORE_PALETTE_KEYS.map((key) => entries.get(key));
+    const custom = [...entries.values()].filter((entry) => !entry.core).sort((a, b) => a.key.localeCompare(b.key));
+    return [...core, ...custom];
+  }
+  async function upsertPaletteColor(key, hex) {
+    const rgb = hexToRgb(hex);
+    if (rgb === null) {
+      throw new Error(`'${hex}' n\xE3o \xE9 uma cor hexadecimal v\xE1lida (use #rrggbb).`);
+    }
+    const style = await findColorStyle(key) ?? figma.createPaintStyle();
+    style.name = styleName(key);
+    style.paints = [{ type: "SOLID", color: rgb, opacity: 1 }];
+  }
+  async function removePaletteColor(key) {
+    const style = await findColorStyle(key);
+    if (style === void 0) return "not-found";
+    style.remove();
+    return "removed";
+  }
+
   // src/kit-builder.ts
   var PAGE_NAME = "UI Kit";
   var FONT_FAMILY = "Inter";
@@ -171,16 +284,6 @@
   var MEDIUM_CANDIDATES = ["Medium", "Regular"];
   var SEMIBOLD_CANDIDATES = ["Semi Bold", "SemiBold", "Medium", "Bold"];
   var BOLD_CANDIDATES = ["Bold", "Semi Bold", "Medium"];
-  var PALETTE = {
-    background: { r: 0.07, g: 0.08, b: 0.12 },
-    surface: { r: 0.16, g: 0.17, b: 0.22 },
-    "surface-raised": { r: 0.22, g: 0.23, b: 0.29 },
-    primary: { r: 0.05, g: 0.6, b: 1 },
-    "primary-muted": { r: 0.3, g: 0.33, b: 0.4 },
-    text: { r: 0.95, g: 0.96, b: 0.98 },
-    "text-muted": { r: 0.62, g: 0.65, b: 0.72 },
-    track: { r: 0.12, g: 0.13, b: 0.17 }
-  };
   var SCREEN_TEMPLATE_NAME = "screen/Exemplo";
   var KIT_BUILDERS = {
     Panel: buildPanel,
@@ -223,6 +326,7 @@
     const ctx = {
       page,
       fonts,
+      palette: {},
       colors: /* @__PURE__ */ new Map(),
       texts: /* @__PURE__ */ new Map(),
       result
@@ -254,7 +358,7 @@
       heading.fontName = ctx.fonts.bold;
       heading.characters = title;
       heading.fontSize = 48;
-      heading.fills = [solid(PALETTE["text-muted"])];
+      heading.fills = [solid(ctx.palette["text-muted"])];
       heading.x = 0;
       heading.y = layout.y;
       page.appendChild(heading);
@@ -324,7 +428,14 @@
     }
     const fonts = await loadFonts(result);
     const page = await findOrCreatePage(PAGE_NAME);
-    const ctx = { page, fonts, colors: /* @__PURE__ */ new Map(), texts: /* @__PURE__ */ new Map(), result };
+    const ctx = {
+      page,
+      fonts,
+      palette: {},
+      colors: /* @__PURE__ */ new Map(),
+      texts: /* @__PURE__ */ new Map(),
+      result
+    };
     await ensureColorStyles(ctx);
     await ensureTextStyles(ctx);
     if (collectExistingNames(page).has(name)) {
@@ -351,12 +462,12 @@
         node.cornerRadius = 20;
         node.layoutSizingHorizontal = "HUG";
         await surface(ctx, node, "primary");
-        const iconLeft = rect("$iconLeft", 40, 40, PALETTE.text, 8);
+        const iconLeft = rect("$iconLeft", 40, 40, ctx.palette.text, 8);
         iconLeft.visible = false;
         node.appendChild(iconLeft);
         const label = await text(ctx, "$label", leaf, { style: "text/button" });
         node.appendChild(label);
-        const iconRight = rect("$iconRight", 40, 40, PALETTE.text, 8);
+        const iconRight = rect("$iconRight", 40, 40, ctx.palette.text, 8);
         iconRight.visible = false;
         node.appendChild(iconRight);
         const labelProperty = addProperty(node, "label", "TEXT", leaf, ctx.result);
@@ -370,9 +481,9 @@
         row(node, 16, 0, 0);
         node.layoutSizingHorizontal = "HUG";
         node.fills = [];
-        const box = rect("Box", 48, 48, PALETTE["surface-raised"], 10);
+        const box = rect("Box", 48, 48, ctx.palette["surface-raised"], 10);
         node.appendChild(box);
-        const check = rect("$checkmark", 28, 28, PALETTE.primary, 6);
+        const check = rect("$checkmark", 28, 28, ctx.palette.primary, 6);
         node.appendChild(check);
         const label = await text(ctx, "$label", leaf, { style: "text/body", align: "LEFT" });
         node.appendChild(label);
@@ -402,14 +513,14 @@
       case "icon": {
         const node = component(name, 64, 64);
         node.fills = [];
-        const glyph = rect("$icon", 64, 64, PALETTE["text-muted"], 8);
+        const glyph = rect("$icon", 64, 64, ctx.palette["text-muted"], 8);
         node.appendChild(glyph);
         return node;
       }
       case "image": {
         const node = component(name, 240, 180);
         node.fills = [];
-        const art = rect("$image", 240, 180, PALETTE["surface-raised"], 12);
+        const art = rect("$image", 240, 180, ctx.palette["surface-raised"], 12);
         node.appendChild(art);
         return node;
       }
@@ -469,20 +580,25 @@
     return names;
   }
   async function ensureColorStyles(ctx) {
-    const existing = /* @__PURE__ */ new Map();
-    for (const style of await figma.getLocalPaintStylesAsync()) {
-      existing.set(style.name, style);
-    }
-    for (const key of Object.keys(PALETTE)) {
-      const name = `color/${key}`;
-      let style = existing.get(name);
-      if (style === void 0) {
-        style = figma.createPaintStyle();
-        style.name = name;
+    const entries = await loadPalette();
+    const byKey = new Map(entries.map((entry) => [entry.key, entry]));
+    const palette = {};
+    for (const key of CORE_PALETTE_KEYS) {
+      const entry = byKey.get(key);
+      const hex = entry?.hex ?? DEFAULT_PALETTE[key];
+      if (entry === void 0 || !entry.exists) {
+        await upsertPaletteColor(key, hex);
         ctx.result.stylesCreated++;
       }
-      style.paints = [solid(PALETTE[key])];
-      ctx.colors.set(key, style);
+      palette[key] = hexToRgb(hex) ?? hexToRgb(DEFAULT_PALETTE[key]);
+    }
+    ctx.palette = palette;
+    for (const style of await figma.getLocalPaintStylesAsync()) {
+      if (!style.name.startsWith("color/")) continue;
+      const key = style.name.slice("color/".length);
+      if (CORE_PALETTE_KEYS.includes(key)) {
+        ctx.colors.set(key, style);
+      }
     }
   }
   var TEXT_STYLES = [
@@ -513,7 +629,7 @@
   function solid(color) {
     return { type: "SOLID", color, opacity: 1 };
   }
-  async function applyFillStyle(node, style, result) {
+  async function applyFillStyle(node, style, warnings) {
     try {
       await node.setFillStyleIdAsync(style.id);
       return;
@@ -523,12 +639,12 @@
       ;
       node.fillStyleId = style.id;
     } catch {
-      result.warnings.push(
+      warnings.push(
         `N\xE3o consegui vincular '${node.name}' ao estilo de cor '${style.name}'. A cor est\xE1 certa, mas sem token: o export vai avisar \`hardcoded-color\` nessa layer.`
       );
     }
   }
-  async function applyTextStyle(node, style, result) {
+  async function applyTextStyle(node, style, warnings) {
     try {
       await node.setTextStyleIdAsync(style.id);
       return;
@@ -538,7 +654,7 @@
       ;
       node.textStyleId = style.id;
     } catch {
-      result.warnings.push(
+      warnings.push(
         `N\xE3o consegui vincular '${node.name}' ao estilo de texto '${style.name}'. As m\xE9tricas est\xE3o certas, mas sem token: o export vai avisar \`hardcoded-typography\` nessa layer.`
       );
     }
@@ -551,21 +667,21 @@
     node.fontSize = options.size ?? 28;
     node.textAlignHorizontal = options.align ?? "CENTER";
     node.textAlignVertical = "CENTER";
-    node.fills = [solid(PALETTE[options.color ?? "text"])];
-    const styleName = options.style;
-    if (styleName !== void 0) {
-      const style = ctx.texts.get(styleName);
+    node.fills = [solid(ctx.palette[options.color ?? "text"])];
+    const styleName2 = options.style;
+    if (styleName2 !== void 0) {
+      const style = ctx.texts.get(styleName2);
       if (style !== void 0) {
-        await applyTextStyle(node, style, ctx.result);
+        await applyTextStyle(node, style, ctx.result.warnings);
       }
     }
     return node;
   }
   async function surface(ctx, node, color) {
-    node.fills = [solid(PALETTE[color])];
+    node.fills = [solid(ctx.palette[color])];
     const style = ctx.colors.get(color);
     if (style !== void 0) {
-      await applyFillStyle(node, style, ctx.result);
+      await applyFillStyle(node, style, ctx.result.warnings);
     }
   }
   function component(name, width, height) {
@@ -731,14 +847,14 @@
       variant.layoutSizingHorizontal = "HUG";
       await surface(ctx, variant, state === "Disabled" ? "primary-muted" : color);
       variant.opacity = state === "Disabled" ? 0.5 : 1;
-      const iconLeft = rect("IconLeft", 40, 40, PALETTE.text, 8);
+      const iconLeft = rect("IconLeft", 40, 40, ctx.palette.text, 8);
       iconLeft.visible = false;
       variant.appendChild(iconLeft);
       iconsLeft.push(iconLeft);
       const label = await text(ctx, "Label", "Bot\xE3o", { style: "text/button" });
       variant.appendChild(label);
       labels.push(label);
-      const iconRight = rect("IconRight", 40, 40, PALETTE.text, 8);
+      const iconRight = rect("IconRight", 40, 40, ctx.palette.text, 8);
       iconRight.visible = false;
       variant.appendChild(iconRight);
       iconsRight.push(iconRight);
@@ -773,7 +889,7 @@
       variant.cornerRadius = 20;
       await surface(ctx, variant, "primary-muted");
       variant.opacity = state === "Disabled" ? 0.5 : 1;
-      const icon = rect("Icon", 56, 56, PALETTE.text, 8);
+      const icon = rect("Icon", 56, 56, ctx.palette.text, 8);
       variant.appendChild(icon);
       variants.push(variant);
     }
@@ -795,7 +911,7 @@
       box.cornerRadius = 12;
       await surface(ctx, box, "track");
       variant.appendChild(box);
-      const checkmark = rect("Checkmark", 28, 28, PALETTE.primary, 6);
+      const checkmark = rect("Checkmark", 28, 28, ctx.palette.primary, 6);
       checkmark.visible = checked === "On";
       box.appendChild(checkmark);
       const label = await text(ctx, "Label", "Op\xE7\xE3o", { style: "text/body", align: "LEFT" });
@@ -815,11 +931,11 @@
   async function buildSlider(ctx) {
     const node = component("Slider", 400, 48);
     node.fills = [];
-    const track = rect("Background", 400, 12, PALETTE.track, 6);
+    const track = rect("Background", 400, 12, ctx.palette.track, 6);
     track.y = 18;
     node.appendChild(track);
     await surface(ctx, track, "track");
-    const fill = rect("Fill", 200, 12, PALETTE.primary, 6);
+    const fill = rect("Fill", 200, 12, ctx.palette.primary, 6);
     fill.y = 18;
     node.appendChild(fill);
     await surface(ctx, fill, "primary");
@@ -828,7 +944,7 @@
     handle.resizeWithoutConstraints(44, 44);
     handle.x = 178;
     handle.y = 2;
-    handle.fills = [solid(PALETTE.text)];
+    handle.fills = [solid(ctx.palette.text)];
     node.appendChild(handle);
     return node;
   }
@@ -864,7 +980,7 @@
   async function buildIcon(ctx) {
     const node = component("Icon", 64, 64);
     node.fills = [];
-    const glyph = rect("Glyph", 64, 64, PALETTE.text, 12);
+    const glyph = rect("Glyph", 64, 64, ctx.palette.text, 12);
     node.appendChild(glyph);
     await surface(ctx, glyph, "text");
     return node;
@@ -872,7 +988,7 @@
   async function buildImage(ctx) {
     const node = component("Image", 240, 180);
     node.fills = [];
-    const placeholder = rect("Placeholder", 240, 180, PALETTE["surface-raised"], 12);
+    const placeholder = rect("Placeholder", 240, 180, ctx.palette["surface-raised"], 12);
     node.appendChild(placeholder);
     const hint = await text(ctx, "Hint", "imagem", {
       style: "text/caption",
@@ -886,10 +1002,10 @@
   async function buildProgressBar(ctx) {
     const node = component("ProgressBar", 400, 32);
     node.fills = [];
-    const track = rect("Background", 400, 32, PALETTE.track, 16);
+    const track = rect("Background", 400, 32, ctx.palette.track, 16);
     node.appendChild(track);
     await surface(ctx, track, "track");
-    const fill = rect("Fill", 240, 32, PALETTE.primary, 16);
+    const fill = rect("Fill", 240, 32, ctx.palette.primary, 16);
     node.appendChild(fill);
     await surface(ctx, fill, "primary");
     return node;
@@ -912,28 +1028,44 @@
     }
     return node;
   }
+  var SCREEN_WIDTH = 1080;
+  var SCREEN_HEIGHT = 1920;
+  var SAFE_AREA_INSET = 80;
+  async function buildScreenFrame(name, background, backgroundStyle, warnings) {
+    const screen = figma.createFrame();
+    screen.name = name;
+    screen.resizeWithoutConstraints(SCREEN_WIDTH, SCREEN_HEIGHT);
+    screen.fills = [solid(background)];
+    if (backgroundStyle !== void 0) {
+      await applyFillStyle(screen, backgroundStyle, warnings);
+    }
+    screen.clipsContent = true;
+    const safeArea = figma.createFrame();
+    safeArea.name = "SafeArea";
+    safeArea.resizeWithoutConstraints(SCREEN_WIDTH, SCREEN_HEIGHT - SAFE_AREA_INSET * 2);
+    safeArea.x = 0;
+    safeArea.y = SAFE_AREA_INSET;
+    safeArea.fills = [];
+    safeArea.constraints = { horizontal: "STRETCH", vertical: "STRETCH" };
+    screen.appendChild(safeArea);
+    return screen;
+  }
   async function buildScreenTemplate(ctx, existing) {
     const name = SCREEN_TEMPLATE_NAME;
     if (existing.has(name)) {
       ctx.result.skipped.push(name);
       return;
     }
-    const screen = figma.createFrame();
-    screen.name = name;
-    screen.resizeWithoutConstraints(1080, 1920);
-    await surface(ctx, screen, "background");
-    screen.clipsContent = true;
+    const screen = await buildScreenFrame(
+      name,
+      ctx.palette.background,
+      ctx.colors.get("background"),
+      ctx.result.warnings
+    );
     screen.x = 1700;
     screen.y = 0;
     ctx.page.appendChild(screen);
-    const safeArea = figma.createFrame();
-    safeArea.name = "SafeArea";
-    safeArea.resizeWithoutConstraints(1080, 1760);
-    safeArea.x = 0;
-    safeArea.y = 80;
-    safeArea.fills = [];
-    safeArea.constraints = { horizontal: "STRETCH", vertical: "STRETCH" };
-    screen.appendChild(safeArea);
+    const safeArea = screen.children[0];
     const hint = await text(
       ctx,
       "_instrucoes",
@@ -957,8 +1089,8 @@
     group.paddingBottom = 0;
     group.fills = [];
     group.resizeWithoutConstraints(1200, 120);
-    for (const key of Object.keys(PALETTE)) {
-      const swatch = rect(`color/${key}`, 120, 120, PALETTE[key], 16);
+    for (const key of CORE_PALETTE_KEYS) {
+      const swatch = rect(`color/${key}`, 120, 120, ctx.palette[key], 16);
       group.appendChild(swatch);
     }
     group.layoutSizingHorizontal = "HUG";
@@ -1091,7 +1223,7 @@
   var PLUGIN_VERSION = "0.1.0";
 
   // src/mappers/color.ts
-  function rgbToHex(color, alpha = 1) {
+  function rgbToHex2(color, alpha = 1) {
     const hex = `#${channel(color.r)}${channel(color.g)}${channel(color.b)}`;
     const a = clamp01(alpha);
     return a >= 1 ? hex : `${hex}${channel(a)}`;
@@ -1232,7 +1364,7 @@
     }
     const paint = visible[visible.length - 1];
     if (paint.type === "SOLID") {
-      const color = rgbToHex(paint.color, paint.opacity ?? 1);
+      const color = rgbToHex2(paint.color, paint.opacity ?? 1);
       const fill = { type: "SOLID", color };
       const styleId = "fillStyleId" in node ? node.fillStyleId : void 0;
       const token = await tokens.colorToken(styleId, color);
@@ -1250,7 +1382,7 @@
     if (paint.type.startsWith("GRADIENT_")) {
       const stops = "gradientStops" in paint ? paint.gradientStops : void 0;
       const first = stops?.[0];
-      const color = first !== void 0 ? rgbToHex(first.color, first.color.a) : "#00000000";
+      const color = first !== void 0 ? rgbToHex2(first.color, first.color.a) : "#00000000";
       bag.warn(
         RULES.unsupportedEffect,
         `Gradiente nao e reconstruido: virou a cor chapada ${color}. Marque a layer com "#img" para sair fiel ao desenho.`,
@@ -1273,7 +1405,7 @@
     if (paint === void 0 || paint.type !== "SOLID") return void 0;
     const weight = readStrokeWeight(node);
     if (weight <= 0) return void 0;
-    const color = rgbToHex(paint.color, paint.opacity ?? 1);
+    const color = rgbToHex2(paint.color, paint.opacity ?? 1);
     const stroke = { color, weight: round(weight) };
     if ("strokeAlign" in node) stroke.align = node.strokeAlign;
     const styleId = "strokeStyleId" in node ? node.strokeStyleId : void 0;
@@ -1525,7 +1657,7 @@
     if (!Array.isArray(fills)) return "#000000";
     const paint = fills.find((item) => item.visible !== false);
     if (paint === void 0 || paint.type !== "SOLID") return "#000000";
-    return rgbToHex(paint.color, paint.opacity ?? 1);
+    return rgbToHex2(paint.color, paint.opacity ?? 1);
   }
   function mapLineHeight(value) {
     if (typeof value !== "object" || value === null) return void 0;
@@ -2323,6 +2455,171 @@
     }
     void scan();
   }
+  async function createScreen(rawName) {
+    if (!isValidScreenSuffix(rawName)) {
+      post({
+        type: "failed",
+        message: `'${rawName}' n\xE3o \xE9 um nome v\xE1lido de tela. Comece com uma letra e use s\xF3 letras, n\xFAmeros e "_" depois dela.`
+      });
+      return;
+    }
+    const name = `screen/${rawName.trim()}`;
+    if (figma.currentPage.children.some((node) => node.name === name)) {
+      post({ type: "failed", message: `J\xE1 existe um frame "${name}" nesta p\xE1gina.` });
+      return;
+    }
+    post({ type: "busy", label: `Criando ${name}...` });
+    try {
+      const palette = await loadPalette();
+      const backgroundHex = palette.find((entry) => entry.key === "background")?.hex;
+      const background = backgroundHex !== void 0 ? hexToRgb(backgroundHex) : null;
+      const styles = await figma.getLocalPaintStylesAsync();
+      const backgroundStyle = styles.find((style) => style.name === "color/background");
+      const warnings = [];
+      const frame = await buildScreenFrame(
+        name,
+        background ?? { r: 0.07, g: 0.08, b: 0.12 },
+        backgroundStyle,
+        warnings
+      );
+      figma.currentPage.appendChild(frame);
+      frame.x = 0;
+      frame.y = bottomOf(figma.currentPage, 64);
+      figma.currentPage.selection = [frame];
+      figma.viewport.scrollAndZoomIntoView([frame]);
+    } catch (error) {
+      post({ type: "failed", message: describeError2(error) });
+      return;
+    }
+    void scan();
+  }
+  async function getPalette() {
+    try {
+      const colors = await loadPalette();
+      post({ type: "palette", colors });
+    } catch (error) {
+      post({ type: "failed", message: describeError2(error) });
+    }
+  }
+  async function setColor(key, hex) {
+    if (hexToRgb(hex) === null) {
+      post({ type: "failed", message: `'${hex}' n\xE3o \xE9 uma cor hexadecimal v\xE1lida. Use o formato #rrggbb.` });
+      return;
+    }
+    try {
+      await upsertPaletteColor(key, hex);
+      await getPalette();
+    } catch (error) {
+      post({ type: "failed", message: describeError2(error) });
+    }
+  }
+  async function addColor(rawName, hex) {
+    const key = toKebab(rawName);
+    if (key.length === 0) {
+      post({ type: "failed", message: 'D\xEA um nome \xE0 cor, por exemplo "hud-danger".' });
+      return;
+    }
+    if (hexToRgb(hex) === null) {
+      post({ type: "failed", message: `'${hex}' n\xE3o \xE9 uma cor hexadecimal v\xE1lida. Use o formato #rrggbb.` });
+      return;
+    }
+    if (isCorePaletteKey(key)) {
+      post({
+        type: "failed",
+        message: `'${key}' j\xE1 \xE9 uma cor base do kit. Use o campo dela na lista para recolorir.`
+      });
+      return;
+    }
+    const existing = await loadPalette();
+    if (existing.some((entry) => entry.key === key)) {
+      post({ type: "failed", message: `J\xE1 existe uma cor '${key}'.` });
+      return;
+    }
+    try {
+      await upsertPaletteColor(key, hex);
+      await getPalette();
+    } catch (error) {
+      post({ type: "failed", message: describeError2(error) });
+    }
+  }
+  async function removeColor(key) {
+    if (isCorePaletteKey(key)) {
+      post({ type: "failed", message: "Cores base n\xE3o podem ser removidas, s\xF3 recoloridas." });
+      return;
+    }
+    try {
+      await removePaletteColor(key);
+      await getPalette();
+    } catch (error) {
+      post({ type: "failed", message: describeError2(error) });
+    }
+  }
+  async function exportKitBatch() {
+    const page = figma.currentPage;
+    const candidates = page.children.filter(
+      (node) => node.type === "COMPONENT" || node.type === "COMPONENT_SET"
+    );
+    if (candidates.length === 0) {
+      post({ type: "failed", message: "Nenhum componente export\xE1vel nesta p\xE1gina." });
+      return;
+    }
+    post({ type: "busy", label: `Exportando ${candidates.length} componente(s)...` });
+    const components = [];
+    const componentFiles = [];
+    const assets = [];
+    const skipped = [];
+    try {
+      for (const node of candidates) {
+        const result = await buildComponent([node], {
+          exportAssets: true,
+          assetScale: ASSET_SCALE,
+          deriveSlices: true
+        });
+        if (result.ir === null || result.canonicalName === null || result.bag.hasErrors) {
+          const firstError = result.bag.sorted().find((item) => item.severity === "error");
+          skipped.push({
+            name: result.canonicalName ?? node.name,
+            reason: firstError?.message ?? "N\xE3o foi poss\xEDvel exportar este componente."
+          });
+          continue;
+        }
+        const canonicalName = result.canonicalName;
+        components.push({ canonicalName });
+        componentFiles.push({
+          path: componentPath(canonicalName),
+          json: JSON.stringify(result.ir, null, 2)
+        });
+        for (const asset of result.assets) {
+          assets.push({ path: assetPath(canonicalName, asset.path), bytes: asset.bytes });
+        }
+      }
+    } catch (error) {
+      post({ type: "failed", message: describeError2(error) });
+      return;
+    }
+    if (components.length === 0) {
+      post({ type: "failed", message: "Nenhum componente export\xE1vel nesta p\xE1gina." });
+      return;
+    }
+    const source = readSource();
+    const manifest = buildKitBatchManifest(
+      { fileKey: source.fileKey, fileName: source.fileName, pageName: page.name },
+      SCHEMA_VERSION,
+      PLUGIN_VERSION,
+      (/* @__PURE__ */ new Date()).toISOString(),
+      components,
+      skipped
+    );
+    post({
+      type: "kit-batch-ready",
+      payload: {
+        fileName: `${sanitizeName(page.name)}.uikitset`,
+        manifestJson: JSON.stringify(manifest, null, 2),
+        components: componentFiles,
+        assets
+      }
+    });
+  }
   figma.ui.onmessage = (message) => {
     switch (message.type) {
       case "rescan":
@@ -2339,6 +2636,24 @@
         break;
       case "create-component":
         void buildCustom2(message.name, message.role);
+        break;
+      case "create-screen":
+        void createScreen(message.name);
+        break;
+      case "get-palette":
+        void getPalette();
+        break;
+      case "set-color":
+        void setColor(message.key, message.hex);
+        break;
+      case "add-color":
+        void addColor(message.name, message.hex);
+        break;
+      case "remove-color":
+        void removeColor(message.key);
+        break;
+      case "export-kit-batch":
+        void exportKitBatch();
         break;
       case "select-node":
         void revealNode(message.nodeId);
@@ -2360,6 +2675,7 @@
     void scan();
   });
   void scan();
+  void getPalette();
   function describeError2(error) {
     return error instanceof Error ? error.message : String(error);
   }

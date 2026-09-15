@@ -33,6 +33,16 @@
         border-bottom: 1px solid var(--figma-color-border, #e6e6e6);
       }
 
+      /*
+       * Mesma pegadinha do .panel[hidden] logo abaixo: o `hidden` do navegador vira
+       * `display: none` só por regra padrão dele, e uma regra de autor com a mesma
+       * especificidade (aqui, `.tabs { display: flex }`) sempre ganha da regra padrão do
+       * navegador — então sem isto a barra de sub-abas "escondida" continuava aparecendo.
+       */
+      .tabs[hidden] {
+        display: none;
+      }
+
       .tab {
         flex: 1;
         padding: 10px 8px;
@@ -373,16 +383,215 @@
       .status.success {
         color: var(--figma-color-text-success, #009951);
       }
+
+      button.secondary {
+        font-family: inherit;
+        font-size: 11px;
+        font-weight: 600;
+        border: 1px solid var(--figma-color-border, #e5e5e5);
+        border-radius: var(--radius);
+        padding: 8px 12px;
+        cursor: pointer;
+        background: var(--figma-color-bg, #fff);
+        color: var(--figma-color-text, #1a1a1a);
+      }
+
+      button.secondary:hover:not(:disabled) {
+        background: var(--figma-color-bg-hover, #f5f5f5);
+      }
+
+      button.secondary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      details.advanced {
+        margin: 16px 0 4px;
+        border: 1px solid var(--figma-color-border, #e6e6e6);
+        border-radius: var(--radius);
+        padding: 8px 10px;
+      }
+
+      details.advanced summary {
+        cursor: pointer;
+        font-weight: 600;
+        color: var(--figma-color-text-secondary, #8c8c8c);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      details.advanced[open] summary {
+        margin-bottom: 8px;
+      }
+
+      details.advanced .prose {
+        margin-top: 8px;
+      }
+
+      .tabs-sub {
+        background: var(--figma-color-bg-secondary, #f5f5f5);
+      }
+
+      .tabs-sub .tab {
+        padding: 7px 8px;
+        font-size: 10px;
+        font-weight: 500;
+      }
+
+      .tabs-sub .tab[aria-selected="true"] {
+        font-weight: 700;
+      }
+
+      .screen-create-row {
+        display: flex;
+        gap: 6px;
+      }
+
+      .screen-create-row input {
+        flex: 1 1 auto;
+        min-width: 0;
+        box-sizing: border-box;
+        font-family: inherit;
+        font-size: 11px;
+        padding: 5px 8px;
+        border-radius: 4px;
+        border: 1px solid var(--figma-color-border, #e5e5e5);
+        background: var(--figma-color-bg, #fff);
+        color: var(--figma-color-text, #1a1a1a);
+      }
+
+      .screen-create-row input:focus {
+        outline: 1px solid var(--figma-color-border-selected, #0d99ff);
+        border-color: var(--figma-color-border-selected, #0d99ff);
+      }
+
+      .screen-create-row button {
+        flex: none;
+      }
+
+      .kit-row.palette-row {
+        justify-content: flex-start;
+      }
+
+      .kit-row.palette-row .kit-row-name {
+        flex: 1 1 auto;
+      }
+
+      /*
+       * input[type=color]: o navegador dá o seletor nativo de graça, só precisa parecer com
+       * o quadradinho de antes em vez do controle cru dele.
+       *
+       * Seletor com o tipo (`input.palette-swatch`), não só a classe: dentro do formulário de
+       * cor nova, `.custom-form input { width: 100% }` tem a mesma especificidade de
+       * `.palette-swatch` sozinho e ganha por ordem — o swatch esticava pra linha toda e
+       * empurrava o campo de hex pra fora, com barra de rolagem horizontal.
+       */
+      input.palette-swatch {
+        width: 20px;
+        height: 20px;
+        border-radius: 4px;
+        flex: none;
+        border: 1px solid var(--figma-color-border, #e5e5e5);
+        padding: 0;
+        background: none;
+        cursor: pointer;
+      }
+
+      .palette-swatch::-webkit-color-swatch-wrapper {
+        padding: 0;
+        border-radius: 3px;
+      }
+
+      .palette-swatch::-webkit-color-swatch {
+        border: none;
+        border-radius: 3px;
+      }
+
+      .palette-add-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      /*
+       * `.custom-form input` (width: 100%) alcança tudo dentro do form, então cada campo
+       * desta linha precisa da própria regra pra dizer o que é fixo (swatch, hash) e o que
+       * cresce pra preencher o resto (nome) — senão cada input tentaria ficar com 100% da
+       * linha, um empurrando o outro pra fora e abrindo rolagem horizontal.
+       */
+      .palette-add-row .palette-add-name {
+        flex: 1 1 auto;
+        width: auto;
+        min-width: 0;
+      }
+
+      .palette-add-row .palette-hex {
+        flex: none;
+        width: 76px;
+      }
+
+      .palette-hex {
+        width: 76px;
+        flex: none;
+        box-sizing: border-box;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 10px;
+        padding: 4px 6px;
+        border-radius: 4px;
+        border: 1px solid var(--figma-color-border, #e5e5e5);
+        background: var(--figma-color-bg, #fff);
+        color: var(--figma-color-text, #1a1a1a);
+      }
+
+      .palette-hex:focus {
+        outline: 1px solid var(--figma-color-border-selected, #0d99ff);
+        border-color: var(--figma-color-border-selected, #0d99ff);
+      }
     </style>
   </head>
   <body>
-    <div class="tabs" role="tablist">
-      <button class="tab" id="tab-export" role="tab" aria-selected="true">Tela</button>
-      <button class="tab" id="tab-component" role="tab" aria-selected="false">Componente</button>
-      <button class="tab" id="tab-kit" role="tab" aria-selected="false">Criar kit</button>
+    <div class="tabs tabs-mode" role="tablist">
+      <button class="tab" id="mode-create" role="tab" aria-selected="true">Criação</button>
+      <button class="tab" id="mode-export" role="tab" aria-selected="false">Exportação</button>
     </div>
 
-    <div class="panel" id="panel-export">
+    <div class="tabs tabs-sub" id="tabs-create" role="tablist">
+      <button class="tab" id="tab-create-screen" role="tab" aria-selected="true">Tela</button>
+      <button class="tab" id="tab-kit" role="tab" aria-selected="false">Componentes</button>
+      <button class="tab" id="tab-colors" role="tab" aria-selected="false">Cores</button>
+    </div>
+
+    <div class="tabs tabs-sub" id="tabs-export" role="tablist" hidden>
+      <button class="tab" id="tab-export" role="tab" aria-selected="true">Tela</button>
+      <button class="tab" id="tab-component" role="tab" aria-selected="false">Componente</button>
+      <button class="tab" id="tab-export-kit" role="tab" aria-selected="false">Kit completo</button>
+    </div>
+
+    <div class="panel" id="panel-create-screen">
+      <main>
+        <p class="section-title">Criar tela</p>
+        <p class="prose">
+          Cria um frame <strong>screen/Nome</strong> comum nesta página — tela não é componente
+          neste fluxo, é só a convenção de nome que o exportador reconhece.
+        </p>
+
+        <label class="field-label" for="screen-create-name">Nome da tela</label>
+        <div class="screen-create-row">
+          <input
+            id="screen-create-name"
+            type="text"
+            placeholder="NomeDaTela"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button class="primary" id="screen-create-button" type="button">Criar tela</button>
+        </div>
+        <div class="status" id="screen-create-status"></div>
+      </main>
+    </div>
+
+    <div class="panel" id="panel-export" hidden>
       <header>
         <p class="screen-name unset" id="screen-name">Nenhuma tela selecionada</p>
         <div class="canvas-size" id="canvas-size">Selecione o frame "screen/..."</div>
@@ -438,27 +647,6 @@
 
     <div class="panel" id="panel-kit" hidden>
       <main>
-        <p class="section-title">O que será criado</p>
-        <p class="prose">
-          Uma página <strong>UI Kit</strong> com os componentes canônicos, os estilos de cor e
-          de texto, e um frame de exemplo já nomeado corretamente. Componentes que já
-          existirem na página não são tocados.
-        </p>
-        <p class="prose">
-          Precisa de um componente só? Use o <strong>Criar</strong> ao lado dele — os estilos
-          são garantidos do mesmo jeito, e nada do que já existe é mexido.
-        </p>
-
-        <!-- Preenchido por ui.ts a partir do KIT_CATALOG: a lista que o designer vê é a
-             mesma fonte que o botão usa para criar. -->
-        <div class="kit-list" id="kit-list"></div>
-
-        <p class="prose">
-          Os nomes são os mesmos que o importador da Unity procura, então usar instâncias
-          destes componentes é o que faz a tela chegar montada do outro lado, com o
-          comportamento dos prefabs do jogo.
-        </p>
-
         <p class="section-title">Componente próprio</p>
         <p class="prose">
           Para o que não está no kit. Nasce com as layers de slot já nomeadas, que é o que o
@@ -478,11 +666,95 @@
         </div>
 
         <div id="kit-result"></div>
-      </main>
-
-      <footer>
-        <button class="primary" id="create-kit">Criar kit nesta página</button>
         <div class="status" id="kit-status"></div>
+
+        <details class="advanced">
+          <summary>Componentes do kit</summary>
+          <p class="prose">
+            Um <strong>Criar</strong> por componente do catálogo. Os estilos de cor e de texto
+            são garantidos desde o primeiro, e nada do que já existe na página é mexido.
+          </p>
+
+          <!-- Preenchido por ui.ts a partir do KIT_CATALOG: a lista que o designer vê é a
+               mesma fonte que o botão usa para criar. -->
+          <div class="kit-list" id="kit-list"></div>
+
+          <p class="prose">
+            Os nomes são os mesmos que o importador da Unity procura, então usar instâncias
+            destes componentes é o que faz a tela chegar montada do outro lado, com o
+            comportamento dos prefabs do jogo.
+          </p>
+        </details>
+
+        <details class="advanced">
+          <summary>Avançado: criar kit completo</summary>
+          <p class="prose">
+            Uma página <strong>UI Kit</strong> com os componentes canônicos, os estilos de cor
+            e de texto, e um frame de exemplo já nomeado corretamente. Componentes que já
+            existirem na página não são tocados. Raramente necessário — o normal é criar um
+            componente de cada vez, ali em cima.
+          </p>
+          <button class="secondary" id="create-kit" type="button">Criar kit nesta página</button>
+        </details>
+      </main>
+    </div>
+
+    <div class="panel" id="panel-colors" hidden>
+      <main>
+        <p class="section-title">Paleta do kit</p>
+        <p class="prose">
+          Edita os Paint Styles <strong>color/*</strong> do arquivo. Qualquer componente já
+          vinculado ao estilo muda de cor sozinho — não precisa recriar nada.
+        </p>
+
+        <div id="palette-list"></div>
+
+        <p class="section-title">Cor nova</p>
+        <div class="custom-form">
+          <div class="palette-add-row">
+            <input
+              id="palette-add-color"
+              class="palette-swatch"
+              type="color"
+              value="#ff4d4d"
+              title="Escolher cor"
+            />
+            <input
+              id="palette-add-name"
+              class="palette-add-name"
+              type="text"
+              placeholder="hud-danger"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <input
+              id="palette-add-hex"
+              class="palette-hex"
+              type="text"
+              placeholder="#ff4d4d"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <button class="primary" id="palette-add-button" type="button">Adicionar</button>
+        </div>
+
+        <div class="status" id="palette-status"></div>
+      </main>
+    </div>
+
+    <div class="panel" id="panel-export-kit" hidden>
+      <main>
+        <p class="section-title">Exportar tudo</p>
+        <p class="prose">
+          Empacota todo componente já criado nesta página num só arquivo
+          <strong>.uikitset</strong>, para a Unity atualizar o kit inteiro de uma vez e manter
+          os componentes em sincronia entre si.
+        </p>
+      </main>
+      <footer>
+        <button class="primary" id="export-kit-batch" type="button">Exportar kit completo</button>
+        <div class="status" id="kit-batch-status"></div>
       </footer>
     </div>
 

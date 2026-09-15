@@ -25,6 +25,20 @@ repositório.
 
 Pronto. O plugin aparece em `Plugins` → `Development` → **Arvore UI Exporter**.
 
+### Os dois modos do plugin
+
+O plugin abre com uma fileira de **modo** no topo, e dentro de cada um a fileira de aba de
+sempre:
+
+| Modo | Abas | Para quê |
+|---|---|---|
+| **Criação** | Tela, Componentes, Cores | Gerar coisas dentro do arquivo do Figma |
+| **Exportação** | Tela, Componente, Kit completo | Empacotar o que já existe para a Unity |
+
+Escolher um modo volta para a aba onde você parou nele da última vez. Selecionar uma tela ou um
+componente no canvas pula sozinho para a aba certa dentro de **Exportação** — até você clicar
+numa aba na mão, aí o plugin para de trocar por conta própria.
+
 ### Por que o app desktop e não o Figma Web
 
 Para carregar um plugin em desenvolvimento, o Figma precisa ler arquivos do seu disco, e o
@@ -38,10 +52,15 @@ exportar, se preferir.
 
 ## 2. Criar os componentes básicos
 
-Antes de montar telas, gere a biblioteca canônica. Abra o plugin, vá na aba **`Criar kit`** e
-clique em **`Criar kit nesta página`**.
+Antes de montar telas, gere a biblioteca canônica. Abra o plugin no modo **Criação** → aba
+**Componentes**.
 
-Aparece uma página chamada **UI Kit** com:
+O normal é ir **componente por componente**: dentro de "Componentes do kit" (recolhido, clique
+para abrir) tem um botão **Criar** por item do catálogo — cria só aquele, com os mesmos estilos
+de cor e texto garantidos, sem mexer no que já existe na página.
+
+Precisa do kit inteiro de uma vez — por exemplo, começando um arquivo do zero? Abra "Avançado:
+criar kit completo" e clique em **`Criar kit nesta página`**. Isso cria tudo de uma vez:
 
 | O que | Detalhe |
 |---|---|
@@ -59,6 +78,25 @@ navegação por gamepad já funcionando. Um retângulo vira um retângulo.
 
 Os nomes são exatamente os que o importador da Unity procura, e existe teste garantindo que as
 duas listas não divergem.
+
+Não está no catálogo? Na mesma aba, **Componente próprio** (no topo do painel) cria um a partir
+de nome + papel (botão, toggle, container, exibição, ícone, imagem) — nasce com as layers de
+slot já nomeadas, prontas para o importador escrever conteúdo nelas.
+
+### Criar uma tela
+
+Não precisa passar pelo kit para começar uma tela. Modo **Criação** → aba **Tela**: dê um nome e
+clique em **`Criar tela`**. Sai um frame comum `screen/Nome` na página atual, pronto para montar
+— tela não é componente neste fluxo, é só a convenção de nome que o exportador reconhece.
+
+### Editar a paleta
+
+Modo **Criação** → aba **Cores**. As 8 cores centrais do kit (fundo, superfície, primária…) e
+qualquer cor própria que você adicionar vivem como Paint Styles `color/<chave>` no arquivo —
+clique no quadrado para abrir o seletor de cor do sistema, ou digite o hex direto, e clique em
+**Salvar**. Qualquer componente já vinculado ao estilo muda de cor sozinho, sem precisar recriar
+nada. As 8 centrais só recolorem — não dá para remover, porque os componentes do kit dependem
+delas pelo nome; cores próprias podem ser removidas.
 
 ---
 
@@ -83,7 +121,8 @@ duas listas não divergem.
    | `hero#img` | Achatar em PNG: ilustrações, logos, e tudo com gradiente, sombra ou blur |
    | `title:loc.menu.title` | Texto que será traduzido |
 
-5. **Selecione o frame raiz** e rode o plugin. A aba `Exportar tela` mostra o relatório.
+5. **Selecione o frame raiz** e rode o plugin. Modo **Exportação** → aba **Tela** mostra o
+   relatório.
 
 6. **Zere os erros.** Erro bloqueia o export; aviso passa. Clicar num item da lista leva a
    viewport até a layer.
@@ -107,6 +146,27 @@ O alvo é exportar com **zero avisos**, não com poucos avisos.
 
 A referência completa das convenções está em
 [figma-conventions.md](https://github.com/VinniHashirama/ui-exporter-tool-docs-and-samples/blob/main/docs/figma-conventions.md).
+
+---
+
+## 4. Exportar um componente avulso
+
+Modo **Exportação** → aba **Componente**. Selecione um `Component` ou `Component Set` (não
+precisa ter sido criado pelo kit — qualquer componente com nome canônico válido serve), confira
+os slots e os avisos, escolha o **papel na Unity** se o plugin não inferiu certo pelo nome, e
+clique em **`Exportar`**. Sai um pacote `<Nome>.uikit`, que o importador da Unity gera ou
+atualiza como prefab em `Assets/UI/Generated/Kit`.
+
+## 5. Exportar o kit completo
+
+Modo **Exportação** → aba **Kit completo**. Empacota **todo componente de primeiro nível** já
+criado na página atual — o kit inteiro, ou só os componentes próprios que você foi criando — num
+único arquivo `.uikitset`. Do lado da Unity, esse arquivo atualiza todos os prefabs do kit de uma
+vez, em vez de importar um `.uikit` por vez, o que é o jeito de manter a Unity em sincronia com o
+Figma depois de uma leva de ajustes visuais.
+
+Componente que falhar ao exportar (nome inválido, erro bloqueante) não trava os outros: ele
+aparece listado como ignorado no arquivo, e o resto do kit sai normalmente.
 
 ---
 
@@ -148,6 +208,8 @@ iframe, e o iframe compacta com `fflate` e dispara o download.
 |---|---|
 | `traverse.ts` | Percorre a árvore e monta o UIIR. O núcleo |
 | `kit-builder.ts` | Cria a biblioteca canônica dentro do Figma |
+| `palette.ts` | Lê/edita a paleta como Paint Styles `color/<chave>` do arquivo |
+| `kit-batch.ts` | Monta o manifesto `kitset.json` do export em lote (`.uikitset`), puro e testado |
 | `naming.ts` | Convenções de nome (`_`, `@`, `#img`, `:loc`) e sanitização |
 | `kit.ts` | Vocabulário canônico do kit |
 | `diagnostics.ts` | Acumula o lint; erro bloqueia o export |
@@ -180,7 +242,12 @@ permite testar a travessia inteira fora do Figma. Os dois que mais importam:
 
 ### Estado
 
-O **export foi validado manualmente no Figma real**. O botão de criar kit foi adicionado depois
-dessa validação e ainda não passou por teste manual — se você for o primeiro a rodar, o
+O **export de tela, o export de componente e a reorganização de abas (Criação/Exportação) foram
+validados manualmente no Figma real**. `loadPalette`/`upsertPaletteColor` (aba Cores) e o laço de
+`exportKitBatch` sobre `figma.currentPage` (`.uikitset`) dependem de Paint Style e de
+`buildComponent` de verdade — caros demais para simular em `figma-mock.ts` — e por isso só têm
+cobertura de teste na parte pura (`hexToRgb`/`rgbToHex`, montagem do `kitset.json`); a parte que
+toca a API do Figma foi validada manualmente, não por teste automatizado. Se você for o primeiro
+a notar algo estranho nelas, o
 [roadmap](https://github.com/VinniHashirama/ui-exporter-tool-docs-and-samples/blob/main/ROADMAP.md)
 lista o que está em aberto.

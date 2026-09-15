@@ -10,6 +10,15 @@ export type UiToSandbox =
   | { type: 'create-kit'; only?: readonly string[] }
   /** Componente fora do kit canônico: o designer escolhe nome e papel. */
   | { type: 'create-component'; name: string; role: string }
+  /** Cria uma tela avulsa na página atual. `name` é o sufixo cru, sem o prefixo `screen/`. */
+  | { type: 'create-screen'; name: string }
+  | { type: 'get-palette' }
+  | { type: 'set-color'; key: string; hex: string }
+  /** `name` vira a chave da cor nova, depois de normalizada. */
+  | { type: 'add-color'; name: string; hex: string }
+  | { type: 'remove-color'; key: string }
+  /** Exporta todo componente da página atual num só pacote `.uikitset`. */
+  | { type: 'export-kit-batch' }
   | { type: 'select-node'; nodeId: string }
   | { type: 'close' }
 
@@ -65,11 +74,40 @@ export interface KitSummary {
   warnings: string[]
 }
 
+/**
+ * Uma cor da paleta do kit, como a aba Cores mostra.
+ *
+ * Forma estrutural própria (não importada de `palette.ts`) porque este arquivo precisa
+ * continuar livre de API do Figma — a UI do plugin roda num bundle separado que não pode
+ * tocar `figma.*`.
+ */
+export interface PaletteEntry {
+  key: string
+  hex: string
+  /** Uma das chaves centrais do kit — protegida contra remoção, não contra recoloração. */
+  core: boolean
+  /** false quando é uma chave central que ainda não tem Paint Style no arquivo. */
+  exists: boolean
+}
+
+export interface KitBatchExportPayload {
+  /** `<nome-da-pagina>.uikitset`. */
+  fileName: string
+  /** JSON já formatado do `kitset.json` que vai na raiz do zip. */
+  manifestJson: string
+  /** `path` já é `components/<slug>/kit.json`. */
+  components: { path: string; json: string }[]
+  /** `path` já inclui `components/<slug>/images/<arquivo>.png`. */
+  assets: PackedAsset[]
+}
+
 /** Mensagens do sandbox para a UI (iframe). */
 export type SandboxToUi =
   | { type: 'scanned'; result: ScanResult }
   | { type: 'component-scanned'; result: ComponentScanResult }
   | { type: 'export-ready'; payload: ExportPayload }
   | { type: 'kit-created'; summary: KitSummary }
+  | { type: 'palette'; colors: PaletteEntry[] }
+  | { type: 'kit-batch-ready'; payload: KitBatchExportPayload }
   | { type: 'busy'; label: string }
   | { type: 'failed'; message: string }

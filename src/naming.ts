@@ -134,6 +134,16 @@ export function parseScreenName(raw: string): string | null {
   return raw.trim().match(SCREEN_PREFIX)?.[1] ?? null
 }
 
+/**
+ * O sufixo que o designer digita para criar uma tela nova, sem o prefixo `screen/`.
+ *
+ * Mesma regra de `SCREEN_PREFIX`, exposta a parte: a UI valida o campo antes de mandar a
+ * mensagem, e o sandbox valida de novo do lado dele, porque e outro contexto de execucao.
+ */
+export function isValidScreenSuffix(raw: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9_]*$/.test(raw.trim())
+}
+
 /** Torna o nome seguro para virar nome de GameObject e componente de path. */
 export function sanitizeName(raw: string): string {
   const cleaned = raw
@@ -194,7 +204,8 @@ export function toKitAssetId(
   }
 }
 
-function toKebab(raw: string): string {
+/** `Item Slot` / `itemSlot` -> `item-slot`. Usado para nome de asset e de cor customizada. */
+export function toKebab(raw: string): string {
   return raw
     .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
     .toLowerCase()

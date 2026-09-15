@@ -3,12 +3,17 @@ import { CUSTOM_ROLES, KIT_CATALOG, ROLE_LABELS } from './kit'
 import type {
   ComponentScanResult,
   ExportPayload,
+  KitBatchExportPayload,
   KitSummary,
+  PaletteEntry,
   SandboxToUi,
   ScanResult,
   UiToSandbox,
 } from './messages'
+import { isValidScreenSuffix } from './naming'
 import type { Diagnostic } from './uiir'
+
+const HEX_PATTERN = /^#[0-9a-fA-F]{6}$/
 
 function send(message: UiToSandbox): void {
   parent.postMessage({ pluginMessage: message }, '*')
@@ -26,12 +31,54 @@ const reportEl = el('report')
 const statusEl = el('status')
 const exportButton = el<HTMLButtonElement>('export')
 
+const screenCreateNameEl = el<HTMLInputElement>('screen-create-name')
+const screenCreateButton = el<HTMLButtonElement>('screen-create-button')
+const screenCreateStatusEl = el('screen-create-status')
+
+const createScreenPanel = el('panel-create-screen')
 const kitPanel = el('panel-kit')
 const exportPanel = el('panel-export')
 const componentPanel = el('panel-component')
+const colorsPanel = el('panel-colors')
+const exportKitPanel = el('panel-export-kit')
+const createScreenTab = el<HTMLButtonElement>('tab-create-screen')
 const kitTab = el<HTMLButtonElement>('tab-kit')
 const exportTab = el<HTMLButtonElement>('tab-export')
 const componentTab = el<HTMLButtonElement>('tab-component')
+const colorsTab = el<HTMLButtonElement>('tab-colors')
+const exportKitTab = el<HTMLButtonElement>('tab-export-kit')
+
+const modeCreateButton = el<HTMLButtonElement>('mode-create')
+const modeExportButton = el<HTMLButtonElement>('mode-export')
+const tabsCreateEl = el('tabs-create')
+const tabsExportEl = el('tabs-export')
+
+const kitBatchButton = el<HTMLButtonElement>('export-kit-batch')
+const kitBatchStatusEl = el('kit-batch-status')
+
+const paletteListEl = el('palette-list')
+const paletteStatusEl = el('palette-status')
+const paletteAddNameEl = el<HTMLInputElement>('palette-add-name')
+const paletteAddColorEl = el<HTMLInputElement>('palette-add-color')
+const paletteAddHexEl = el<HTMLInputElement>('palette-add-hex')
+const paletteAddButton = el<HTMLButtonElement>('palette-add-button')
+
+/**
+ * `input[type=color]` só aceita `#rrggbb` de 6 dígitos, minúsculo. O designer digitando o
+ * hex à mão pode passar por estados intermediários (`#f`, `#ff4`) que não validam — por
+ * isso o picker só reflete o texto quando ele já virou um hex completo.
+ */
+function syncColorPicker(picker: HTMLInputElement, hexField: HTMLInputElement): void {
+  picker.addEventListener('input', () => {
+    hexField.value = picker.value
+  })
+  hexField.addEventListener('input', () => {
+    const hex = hexField.value.trim()
+    if (HEX_PATTERN.test(hex)) picker.value = hex
+  })
+}
+
+syncColorPicker(paletteAddColorEl, paletteAddHexEl)
 
 const componentNameEl = el('component-name')
 const componentSizeEl = el('component-size')
@@ -71,10 +118,65 @@ exportButton.addEventListener('click', () => {
   send({ type: 'export' })
 })
 
+/**
+ * Telas não são componentes neste fluxo — criar uma não passa pelo "criar kit". `name` fica
+ * cru (sem o prefixo `screen/`); o sandbox valida de novo antes de montar o frame.
+ */
+function submitScreenCreate(): void {
+  const name = screenCreateNameEl.value.trim()
+
+  if (name.length === 0) {
+    setScreenCreateStatus('Dê um nome à tela, por exemplo "HomeMenu".', 'error')
+    screenCreateNameEl.focus()
+    return
+  }
+
+  if (!isValidScreenSuffix(name)) {
+    setScreenCreateStatus(
+      'Comece com uma letra e use só letras, números e "_" depois dela.',
+      'error',
+    )
+    screenCreateNameEl.focus()
+    return
+  }
+
+  screenCreateButton.disabled = true
+  screenCreateNameEl.disabled = true
+  setScreenCreateStatus(`Criando screen/${name}...`, null)
+  send({ type: 'create-screen', name })
+}
+
+screenCreateButton.addEventListener('click', submitScreenCreate)
+
+screenCreateNameEl.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') submitScreenCreate()
+})
+
+function setScreenCreateStatus(message: string, kind: 'error' | 'success' | null): void {
+  screenCreateStatusEl.textContent = message
+  screenCreateStatusEl.className = kind === null ? 'status' : `status ${kind}`
+}
+
+function endScreenCreateWork(): void {
+  screenCreateButton.disabled = false
+  screenCreateNameEl.disabled = false
+}
+
 kitButton.addEventListener('click', () => {
   startKitWork('Criando componentes...')
   send({ type: 'create-kit' })
 })
+
+kitBatchButton.addEventListener('click', () => {
+  kitBatchButton.disabled = true
+  setKitBatchStatus('Exportando...', null)
+  send({ type: 'export-kit-batch' })
+})
+
+function setKitBatchStatus(message: string, kind: 'error' | 'success' | null): void {
+  kitBatchStatusEl.textContent = message
+  kitBatchStatusEl.className = kind === null ? 'status' : `status ${kind}`
+}
 
 /**
  * Trava os dois caminhos de criação enquanto um roda.
@@ -165,26 +267,169 @@ function renderKitCatalog(): void {
 renderKitCatalog()
 renderRoles()
 
-type Tab = 'export' | 'component' | 'kit'
+/** Botões "Salvar"/"Remover" da paleta, para poder desabilitar todos enquanto um roda. */
+let paletteButtons: HTMLButtonElement[] = []
+
+function renderPalette(colors: PaletteEntry[]): void {
+  paletteListEl.replaceChildren()
+  paletteButtons = []
+
+  for (const entry of colors) {
+    const row = document.createElement('div')
+    row.className = 'kit-row palette-row'
+
+    const swatch = document.createElement('input')
+    swatch.className = 'palette-swatch'
+    swatch.type = 'color'
+    swatch.title = `Escolher cor de ${entry.key}`
+    // input[type=color] só aceita #rrggbb de 6 dígitos — a paleta sempre guarda o hex nesse
+    // formato (validado na escrita), então não precisa de fallback aqui.
+    swatch.value = entry.hex
+    row.append(swatch)
+
+    const label = document.createElement('span')
+    label.className = 'kit-row-name'
+    label.textContent = entry.key
+    row.append(label)
+
+    const hexInput = document.createElement('input')
+    hexInput.className = 'palette-hex'
+    hexInput.type = 'text'
+    hexInput.value = entry.hex
+    hexInput.autocomplete = 'off'
+    hexInput.spellcheck = false
+    row.append(hexInput)
+
+    syncColorPicker(swatch, hexInput)
+
+    const saveButton = document.createElement('button')
+    saveButton.type = 'button'
+    saveButton.textContent = 'Salvar'
+    saveButton.addEventListener('click', () => {
+      const hex = hexInput.value.trim()
+      if (!HEX_PATTERN.test(hex)) {
+        setPaletteStatus(`'${hex}' não é uma cor hexadecimal válida. Use o formato #rrggbb.`, 'error')
+        return
+      }
+      startPaletteWork('Salvando...')
+      send({ type: 'set-color', key: entry.key, hex })
+    })
+    paletteButtons.push(saveButton)
+    row.append(saveButton)
+
+    if (!entry.core) {
+      const removeButton = document.createElement('button')
+      removeButton.type = 'button'
+      removeButton.textContent = 'Remover'
+      removeButton.addEventListener('click', () => {
+        startPaletteWork(`Removendo ${entry.key}...`)
+        send({ type: 'remove-color', key: entry.key })
+      })
+      paletteButtons.push(removeButton)
+      row.append(removeButton)
+    }
+
+    paletteListEl.append(row)
+  }
+}
+
+function startPaletteWork(label: string): void {
+  for (const button of paletteButtons) button.disabled = true
+  paletteAddButton.disabled = true
+  setPaletteStatus(label, null)
+}
+
+function submitAddColor(): void {
+  const name = paletteAddNameEl.value.trim()
+  const hex = paletteAddHexEl.value.trim()
+
+  if (name.length === 0) {
+    setPaletteStatus('Dê um nome à cor, por exemplo "hud-danger".', 'error')
+    paletteAddNameEl.focus()
+    return
+  }
+
+  if (!HEX_PATTERN.test(hex)) {
+    setPaletteStatus(`'${hex}' não é uma cor hexadecimal válida. Use o formato #rrggbb.`, 'error')
+    paletteAddHexEl.focus()
+    return
+  }
+
+  startPaletteWork(`Adicionando ${name}...`)
+  send({ type: 'add-color', name, hex })
+}
+
+paletteAddButton.addEventListener('click', submitAddColor)
+
+function setPaletteStatus(message: string, kind: 'error' | 'success' | null): void {
+  paletteStatusEl.textContent = message
+  paletteStatusEl.className = kind === null ? 'status' : `status ${kind}`
+}
+
+function endPaletteWork(): void {
+  for (const button of paletteButtons) button.disabled = false
+  paletteAddButton.disabled = false
+}
+
+/**
+ * Duas features bem diferentes moram no mesmo plugin — criar peças do kit e exportar o que
+ * já existe. Misturadas numa fileira só de abas, uma bagunça a outra. O modo é o nível de
+ * cima (o que eu quero fazer agora?); a aba é o nível de baixo (com o quê?).
+ */
+type Mode = 'create' | 'export'
+type Tab = 'create-screen' | 'kit' | 'colors' | 'export' | 'component' | 'export-kit'
+
+const MODE_OF: Readonly<Record<Tab, Mode>> = {
+  'create-screen': 'create',
+  kit: 'create',
+  colors: 'create',
+  export: 'export',
+  component: 'export',
+  'export-kit': 'export',
+}
 
 const TABS: ReadonlyArray<{ id: Tab; tab: HTMLButtonElement; panel: HTMLElement }> = [
+  { id: 'create-screen', tab: createScreenTab, panel: createScreenPanel },
+  { id: 'kit', tab: kitTab, panel: kitPanel },
+  { id: 'colors', tab: colorsTab, panel: colorsPanel },
   { id: 'export', tab: exportTab, panel: exportPanel },
   { id: 'component', tab: componentTab, panel: componentPanel },
-  { id: 'kit', tab: kitTab, panel: kitPanel },
+  { id: 'export-kit', tab: exportKitTab, panel: exportKitPanel },
 ]
+
+const MODE_TABS: ReadonlyArray<{ id: Mode; button: HTMLButtonElement; bar: HTMLElement }> = [
+  { id: 'create', button: modeCreateButton, bar: tabsCreateEl },
+  { id: 'export', button: modeExportButton, bar: tabsExportEl },
+]
+
+/** Aba lembrada de cada modo, para o botão de modo devolver onde o designer parou. */
+const lastTabForMode: Record<Mode, Tab> = { create: 'create-screen', export: 'export' }
 
 for (const entry of TABS) {
   entry.tab.addEventListener('click', () => selectTab(entry.id))
 }
 
+for (const modeEntry of MODE_TABS) {
+  modeEntry.button.addEventListener('click', () => selectTab(lastTabForMode[modeEntry.id]))
+}
+
 /** true depois que o usuario clica numa aba: a partir dai a selecao para de trocar sozinha. */
 let tabPinned = false
 
-function selectTab(mode: Tab, byUser = true): void {
+function selectTab(tab: Tab, byUser = true): void {
   if (byUser) tabPinned = true
 
+  const mode = MODE_OF[tab]
+  lastTabForMode[mode] = tab
+
+  for (const modeEntry of MODE_TABS) {
+    const active = modeEntry.id === mode
+    modeEntry.button.setAttribute('aria-selected', String(active))
+    modeEntry.bar.hidden = !active
+  }
+
   for (const entry of TABS) {
-    const active = entry.id === mode
+    const active = entry.id === tab
     entry.panel.hidden = !active
     entry.tab.setAttribute('aria-selected', String(active))
   }
@@ -196,8 +441,8 @@ function selectTab(mode: Tab, byUser = true): void {
  * Selecionar um componente e continuar vendo "nenhuma tela selecionada" faria o plugin
  * parecer quebrado. Depois de uma escolha explicita, respeitar essa escolha.
  */
-function followSelection(mode: Tab): void {
-  if (!tabPinned) selectTab(mode, false)
+function followSelection(tab: Tab): void {
+  if (!tabPinned) selectTab(tab, false)
 }
 
 window.onmessage = (event: MessageEvent): void => {
@@ -217,8 +462,10 @@ window.onmessage = (event: MessageEvent): void => {
     case 'busy':
       exportButton.disabled = true
       exportComponentButton.disabled = true
+      kitBatchButton.disabled = true
       setStatus(message.label, null)
       setComponentStatus(message.label, null)
+      setKitBatchStatus(message.label, null)
       break
     case 'export-ready':
       void deliver(message.payload)
@@ -226,15 +473,28 @@ window.onmessage = (event: MessageEvent): void => {
     case 'kit-created':
       renderKitResult(message.summary)
       break
+    case 'palette':
+      renderPalette(message.colors)
+      setPaletteStatus('', null)
+      break
+    case 'kit-batch-ready':
+      void deliverKitBatch(message.payload)
+      break
     case 'failed':
       // Um erro pode vir de qualquer um dos fluxos; mostrar em todos evita a mensagem
       // aparecer numa aba que o usuário não está olhando.
       setStatus(message.message, 'error')
       setComponentStatus(message.message, 'error')
       setKitStatus(message.message, 'error')
+      setScreenCreateStatus(message.message, 'error')
+      setPaletteStatus(message.message, 'error')
+      setKitBatchStatus(message.message, 'error')
       exportButton.disabled = true
       exportComponentButton.disabled = true
+      kitBatchButton.disabled = false
       endKitWork()
+      endScreenCreateWork()
+      endPaletteWork()
       break
   }
 }
@@ -405,6 +665,13 @@ function render(result: ScanResult): void {
     canvasSizeEl.textContent = 'Selecione o frame "screen/..."'
   }
 
+  // Depois de uma tela criada e selecionada, limpa o formulário de criação — que agora vive
+  // na aba Criação > Tela, independente do que está selecionado aqui.
+  if (result.screenName !== null) {
+    screenCreateNameEl.value = ''
+    setScreenCreateStatus('', null)
+  }
+
   stats.nodes.textContent = String(result.nodeCount)
   stats.components.textContent = String(result.componentCount)
   stats.binds.textContent = String(result.bindCount)
@@ -563,5 +830,50 @@ async function deliver(payload: ExportPayload): Promise<void> {
     setStatus(error instanceof Error ? error.message : String(error), 'error')
   } finally {
     exportButton.disabled = current === null || current.screenName === null
+  }
+}
+
+/**
+ * Mesma ideia do `deliver()`, para o pacote `.uikitset` — zipa tudo num só arquivo, com cada
+ * `kit.json` de componente e seus assets já no path `components/<slug>/...` que o
+ * `kitset.json` (dentro de `payload.manifestJson`) declara.
+ */
+async function deliverKitBatch(payload: KitBatchExportPayload): Promise<void> {
+  try {
+    const files: Record<string, Uint8Array> = { 'kitset.json': strToU8(payload.manifestJson) }
+    for (const component of payload.components) {
+      files[component.path] = strToU8(component.json)
+    }
+    for (const asset of payload.assets) {
+      files[asset.path] = asset.bytes
+    }
+
+    const zipped = zipSync(files, { level: 6 })
+
+    const blob = new Blob([zipped.slice().buffer as ArrayBuffer], { type: 'application/zip' })
+    const url = URL.createObjectURL(blob)
+
+    try {
+      const link = document.createElement('a')
+      link.href = url
+      link.download = payload.fileName
+      link.click()
+    } finally {
+      URL.revokeObjectURL(url)
+    }
+
+    // `skipped` só existe dentro do manifesto — reler daqui evita duplicar a contagem no
+    // sandbox só para a mensagem de status.
+    const manifest = JSON.parse(payload.manifestJson) as { skipped: unknown[] }
+    const kb = (zipped.length / 1024).toFixed(0)
+    setKitBatchStatus(
+      `${payload.fileName} salvo (${kb} kb) — ${payload.components.length} componente(s), ` +
+        `${manifest.skipped.length} ignorado(s)`,
+      'success',
+    )
+  } catch (error) {
+    setKitBatchStatus(error instanceof Error ? error.message : String(error), 'error')
+  } finally {
+    kitBatchButton.disabled = false
   }
 }
