@@ -3,7 +3,7 @@ import { CUSTOM_ROLES, KIT_CATALOG, ROLE_LABELS } from './kit'
 import type {
   ComponentScanResult,
   ExportPayload,
-  KitBatchExportPayload,
+  KitExportPayload,
   KitSummary,
   PaletteEntry,
   SandboxToUi,
@@ -170,7 +170,7 @@ kitButton.addEventListener('click', () => {
 kitBatchButton.addEventListener('click', () => {
   kitBatchButton.disabled = true
   setKitBatchStatus('Exportando...', null)
-  send({ type: 'export-kit-batch' })
+  send({ type: 'export-kit' })
 })
 
 function setKitBatchStatus(message: string, kind: 'error' | 'success' | null): void {
@@ -477,7 +477,7 @@ window.onmessage = (event: MessageEvent): void => {
       renderPalette(message.colors)
       setPaletteStatus('', null)
       break
-    case 'kit-batch-ready':
+    case 'kit-ready':
       void deliverKitBatch(message.payload)
       break
     case 'failed':
@@ -834,13 +834,13 @@ async function deliver(payload: ExportPayload): Promise<void> {
 }
 
 /**
- * Mesma ideia do `deliver()`, para o pacote `.uikitset` — zipa tudo num só arquivo, com cada
- * `kit.json` de componente e seus assets já no path `components/<slug>/...` que o
- * `kitset.json` (dentro de `payload.manifestJson`) declara.
+ * Mesma ideia do `deliver()`, para o pacote `.uikit` — zipa tudo num só arquivo, com cada
+ * `component.json` de componente e seus assets já no path `components/<slug>/...` que o
+ * `kit.json` (dentro de `payload.manifestJson`) declara.
  */
-async function deliverKitBatch(payload: KitBatchExportPayload): Promise<void> {
+async function deliverKitBatch(payload: KitExportPayload): Promise<void> {
   try {
-    const files: Record<string, Uint8Array> = { 'kitset.json': strToU8(payload.manifestJson) }
+    const files: Record<string, Uint8Array> = { 'kit.json': strToU8(payload.manifestJson) }
     for (const component of payload.components) {
       files[component.path] = strToU8(component.json)
     }

@@ -15,8 +15,8 @@ import { TokenCollector } from './tokens'
 import type {
   Asset,
   Canvas,
+  Component,
   IRNode,
-  Kit,
   KitRole,
   KitSlot,
   NodeKind,
@@ -133,7 +133,7 @@ interface Ctx {
  *
  * Reusa `visit()` inteiro: travessia, mappers, tokens e assets sao os mesmos de uma tela. O
  * que muda e so a entrada — a raiz e um COMPONENT em vez de um frame `screen/` — e o
- * cabecalho `kit`, que diz ao importador para gerar um prefab em vez de uma tela.
+ * cabecalho `component`, que diz ao importador para gerar um prefab em vez de uma tela.
  */
 export async function buildComponent(
   selection: readonly SceneNode[],
@@ -231,14 +231,14 @@ export async function buildComponent(
 
   const slots = collectSlots(source, ctx)
 
-  const kit: Kit = {
+  const component: Component = {
     canonicalName,
     role: inferRole(canonicalName, opts.role),
     slots,
   }
 
-  if (selected.type === 'COMPONENT_SET') kit.sourceVariantId = source.id
-  if (ignoredVariants.length > 0) kit.ignoredVariants = ignoredVariants
+  if (selected.type === 'COMPONENT_SET') component.sourceVariantId = source.id
+  if (ignoredVariants.length > 0) component.ignoredVariants = ignoredVariants
 
   const ir: UIIR = {
     schemaVersion: SCHEMA_VERSION,
@@ -247,7 +247,7 @@ export async function buildComponent(
       width: round(source.width),
       height: round(source.height),
     },
-    kit,
+    component,
     assets: ctx.assets,
     lint: bag.sorted(),
     root: irRoot,

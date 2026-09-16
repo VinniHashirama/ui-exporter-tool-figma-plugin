@@ -1,5 +1,5 @@
 /**
- * Gera samples/HomeMenu.uiexport sem precisar do Figma.
+ * Gera samples/HomeMenu.uiscreen sem precisar do Figma.
  *
  * Serve para dois propositos:
  *  - o importador da Unity pode ser desenvolvido e testado antes de existir um arquivo
@@ -41,19 +41,19 @@ const schemaPath = new URL('../schema/uiir.schema.json', import.meta.url)
  * golden file da Unity validando um formato que ja nao existe.
  */
 const SIBLING_TARGETS = [
-  { repo: 'ui-exporter-tool-unity-package', file: 'Samples~/HomeMenu.uiexport' },
-  { repo: 'ui-exporter-tool-docs-and-samples', file: 'samples/HomeMenu.uiexport' },
+  { repo: 'ui-exporter-tool-unity-package', file: 'Samples~/HomeMenu.uiscreen' },
+  { repo: 'ui-exporter-tool-docs-and-samples', file: 'samples/HomeMenu.uiscreen' },
 ] as const
 
-const localTarget = `${here}/../samples/HomeMenu.uiexport`
+const localTarget = `${here}/../samples/HomeMenu.uiscreen`
 
 /** O mesmo, para o pacote de componente. */
 const KIT_SIBLING_TARGETS = [
-  { repo: 'ui-exporter-tool-unity-package', file: 'Samples~/Button_Primary.uikit' },
-  { repo: 'ui-exporter-tool-docs-and-samples', file: 'samples/Button_Primary.uikit' },
+  { repo: 'ui-exporter-tool-unity-package', file: 'Samples~/Button_Primary.uicomponent' },
+  { repo: 'ui-exporter-tool-docs-and-samples', file: 'samples/Button_Primary.uicomponent' },
 ] as const
 
-const kitLocalTarget = `${here}/../samples/Button_Primary.uikit`
+const kitLocalTarget = `${here}/../samples/Button_Primary.uicomponent`
 
 /** Fixo para o pacote ser byte-a-byte reproduzivel: ele e golden file dos testes. */
 const FIXED_TIMESTAMP = '2026-01-01T00:00:00.000Z'
@@ -365,7 +365,7 @@ result.ir.source.exportedAt = FIXED_TIMESTAMP
 
 // O mock devolve bytes de brincadeira; o sample precisa de PNG que a Unity abra.
 const files: Record<string, Uint8Array> = {
-  'ui.json': strToU8(JSON.stringify(result.ir, null, 2)),
+  'screen.json': strToU8(JSON.stringify(result.ir, null, 2)),
 }
 
 for (const packed of result.assets) {
@@ -410,7 +410,7 @@ function emit(
   }
 }
 
-emit(packed, localTarget, 'samples/HomeMenu.uiexport', SIBLING_TARGETS)
+emit(packed, localTarget, 'samples/HomeMenu.uiscreen', SIBLING_TARGETS)
 
 // ------------------------------------------------- pacote de componente do kit
 
@@ -439,7 +439,7 @@ if (!ajv.validate(schema, kitResult.ir)) {
 kitResult.ir.source.exportedAt = FIXED_TIMESTAMP
 
 const kitFiles: Record<string, Uint8Array> = {
-  'kit.json': strToU8(JSON.stringify(kitResult.ir, null, 2)),
+  'component.json': strToU8(JSON.stringify(kitResult.ir, null, 2)),
 }
 
 for (const asset of kitResult.assets) {
@@ -454,7 +454,7 @@ for (const asset of kitResult.assets) {
 emit(
   zipSync(kitFiles, { level: 6, mtime: FIXED_TIMESTAMP }),
   kitLocalTarget,
-  'samples/Button_Primary.uikit',
+  'samples/Button_Primary.uicomponent',
   KIT_SIBLING_TARGETS,
 )
 

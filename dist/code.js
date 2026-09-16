@@ -53,7 +53,7 @@
     return canonicalName.split("/").join("_");
   }
   function componentPath(canonicalName) {
-    return `components/${slugFor(canonicalName)}/kit.json`;
+    return `components/${slugFor(canonicalName)}/component.json`;
   }
   function assetPath(canonicalName, assetFile) {
     return `components/${slugFor(canonicalName)}/${assetFile}`;
@@ -1219,7 +1219,7 @@
   }
 
   // src/uiir.ts
-  var SCHEMA_VERSION = "1.1.0";
+  var SCHEMA_VERSION = "2.0.0";
   var PLUGIN_VERSION = "0.1.0";
 
   // src/mappers/color.ts
@@ -1789,13 +1789,13 @@
     }
     irRoot.name = canonicalName.split("/").join("_");
     const slots = collectSlots(source, ctx);
-    const kit = {
+    const component2 = {
       canonicalName,
       role: inferRole(canonicalName, opts.role),
       slots
     };
-    if (selected.type === "COMPONENT_SET") kit.sourceVariantId = source.id;
-    if (ignoredVariants.length > 0) kit.ignoredVariants = ignoredVariants;
+    if (selected.type === "COMPONENT_SET") component2.sourceVariantId = source.id;
+    if (ignoredVariants.length > 0) component2.ignoredVariants = ignoredVariants;
     const ir = {
       schemaVersion: SCHEMA_VERSION,
       source: readSource(),
@@ -1803,7 +1803,7 @@
         width: round(source.width),
         height: round(source.height)
       },
-      kit,
+      component: component2,
       assets: ctx.assets,
       lint: bag.sorted(),
       root: irRoot
@@ -2319,12 +2319,12 @@
           type: "component-scanned",
           result: {
             canonicalName: result2.canonicalName,
-            role: result2.ir?.kit?.role ?? null,
+            role: result2.ir?.component?.role ?? null,
             width: result2.ir?.canvas.width ?? 0,
             height: result2.ir?.canvas.height ?? 0,
             nodeCount: result2.nodeCount,
             assetCount: result2.ir?.assets.length ?? 0,
-            slots: result2.ir?.kit?.slots.map((slot) => slot.name) ?? [],
+            slots: result2.ir?.component?.slots.map((slot) => slot.name) ?? [],
             diagnostics: result2.bag.sorted()
           }
         });
@@ -2377,8 +2377,8 @@
       post({
         type: "export-ready",
         payload: {
-          fileName: `${result.screenName}.uiexport`,
-          jsonEntry: "ui.json",
+          fileName: `${result.screenName}.uiscreen`,
+          jsonEntry: "screen.json",
           json: JSON.stringify(result.ir, null, 2),
           assets: result.assets
         }
@@ -2401,12 +2401,12 @@
           type: "component-scanned",
           result: {
             canonicalName: result.canonicalName,
-            role: result.ir?.kit?.role ?? null,
+            role: result.ir?.component?.role ?? null,
             width: result.ir?.canvas.width ?? 0,
             height: result.ir?.canvas.height ?? 0,
             nodeCount: result.nodeCount,
             assetCount: result.ir?.assets.length ?? 0,
-            slots: result.ir?.kit?.slots.map((slot) => slot.name) ?? [],
+            slots: result.ir?.component?.slots.map((slot) => slot.name) ?? [],
             diagnostics: result.bag.sorted()
           }
         });
@@ -2415,9 +2415,9 @@
       post({
         type: "export-ready",
         payload: {
-          // `Button/Primary` -> `Button_Primary.uikit`: '/' nao pode ir para nome de arquivo.
-          fileName: `${result.canonicalName.split("/").join("_")}.uikit`,
-          jsonEntry: "kit.json",
+          // `Button/Primary` -> `Button_Primary.uicomponent`: '/' nao pode ir para nome de arquivo.
+          fileName: `${result.canonicalName.split("/").join("_")}.uicomponent`,
+          jsonEntry: "component.json",
           json: JSON.stringify(result.ir, null, 2),
           assets: result.assets
         }
@@ -2611,9 +2611,9 @@
       skipped
     );
     post({
-      type: "kit-batch-ready",
+      type: "kit-ready",
       payload: {
-        fileName: `${sanitizeName(page.name)}.uikitset`,
+        fileName: `${sanitizeName(page.name)}.uikit`,
         manifestJson: JSON.stringify(manifest, null, 2),
         components: componentFiles,
         assets
@@ -2652,7 +2652,7 @@
       case "remove-color":
         void removeColor(message.key);
         break;
-      case "export-kit-batch":
+      case "export-kit":
         void exportKitBatch();
         break;
       case "select-node":

@@ -56,12 +56,12 @@ async function scan(): Promise<void> {
         type: 'component-scanned',
         result: {
           canonicalName: result.canonicalName,
-          role: result.ir?.kit?.role ?? null,
+          role: result.ir?.component?.role ?? null,
           width: result.ir?.canvas.width ?? 0,
           height: result.ir?.canvas.height ?? 0,
           nodeCount: result.nodeCount,
           assetCount: result.ir?.assets.length ?? 0,
-          slots: result.ir?.kit?.slots.map((slot) => slot.name) ?? [],
+          slots: result.ir?.component?.slots.map((slot) => slot.name) ?? [],
           diagnostics: result.bag.sorted(),
         },
       })
@@ -122,8 +122,8 @@ async function exportScreen(): Promise<void> {
     post({
       type: 'export-ready',
       payload: {
-        fileName: `${result.screenName}.uiexport`,
-        jsonEntry: 'ui.json',
+        fileName: `${result.screenName}.uiscreen`,
+        jsonEntry: 'screen.json',
         json: JSON.stringify(result.ir, null, 2),
         assets: result.assets,
       },
@@ -156,12 +156,12 @@ async function exportComponent(role: string | undefined): Promise<void> {
         type: 'component-scanned',
         result: {
           canonicalName: result.canonicalName,
-          role: result.ir?.kit?.role ?? null,
+          role: result.ir?.component?.role ?? null,
           width: result.ir?.canvas.width ?? 0,
           height: result.ir?.canvas.height ?? 0,
           nodeCount: result.nodeCount,
           assetCount: result.ir?.assets.length ?? 0,
-          slots: result.ir?.kit?.slots.map((slot) => slot.name) ?? [],
+          slots: result.ir?.component?.slots.map((slot) => slot.name) ?? [],
           diagnostics: result.bag.sorted(),
         },
       })
@@ -171,9 +171,9 @@ async function exportComponent(role: string | undefined): Promise<void> {
     post({
       type: 'export-ready',
       payload: {
-        // `Button/Primary` -> `Button_Primary.uikit`: '/' nao pode ir para nome de arquivo.
-        fileName: `${result.canonicalName.split('/').join('_')}.uikit`,
-        jsonEntry: 'kit.json',
+        // `Button/Primary` -> `Button_Primary.uicomponent`: '/' nao pode ir para nome de arquivo.
+        fileName: `${result.canonicalName.split('/').join('_')}.uicomponent`,
+        jsonEntry: 'component.json',
         json: JSON.stringify(result.ir, null, 2),
         assets: result.assets,
       },
@@ -356,7 +356,7 @@ async function removeColor(key: string): Promise<void> {
 }
 
 /**
- * Exporta todo componente de primeiro nível da página atual num só pacote `.uikitset`, pra a
+ * Exporta todo componente de primeiro nível da página atual num só pacote `.uikit`, pra a
  * Unity atualizar o kit inteiro de uma vez e manter os componentes em sincronia entre si.
  *
  * Só nós de primeiro nível: igual ao `collectExistingNames` do kit-builder, instância e
@@ -431,9 +431,9 @@ async function exportKitBatch(): Promise<void> {
   )
 
   post({
-    type: 'kit-batch-ready',
+    type: 'kit-ready',
     payload: {
-      fileName: `${sanitizeName(page.name)}.uikitset`,
+      fileName: `${sanitizeName(page.name)}.uikit`,
       manifestJson: JSON.stringify(manifest, null, 2),
       components: componentFiles,
       assets,
@@ -473,7 +473,7 @@ figma.ui.onmessage = (message: UiToSandbox): void => {
     case 'remove-color':
       void removeColor(message.key)
       break
-    case 'export-kit-batch':
+    case 'export-kit':
       void exportKitBatch()
       break
     case 'select-node':

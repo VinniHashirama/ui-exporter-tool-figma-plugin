@@ -2,7 +2,7 @@
   "name": "arvore-ui-exporter-figma-plugin",
   "version": "0.1.0",
   "private": true,
-  "description": "Plugin do Figma: exporta uma tela como pacote .uiexport (UIIR + assets) para o importador da Unity.",
+  "description": "Plugin do Figma: exporta uma tela como pacote .uiscreen (UIIR + assets) para o importador da Unity.",
   "license": "UNLICENSED",
   "type": "module",
   "engines": {

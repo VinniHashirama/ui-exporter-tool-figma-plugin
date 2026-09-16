@@ -4,21 +4,21 @@ import { assetPath, buildKitBatchManifest, componentPath, slugFor } from '../src
 /**
  * O leitor do lado da Unity é escrito em paralelo contra este formato exato — por isso o que
  * importa testar aqui é a forma do manifesto e a regra de path, não o conteúdo de cada
- * `kit.json` (isso já é coberto pelos testes de `traverse.ts`).
+ * `component.json` (isso já é coberto pelos testes de `traverse.ts`).
  */
 describe('slugFor / componentPath / assetPath', () => {
-  it('slug troca "/" por "_", igual ao nome de arquivo do .uikit avulso', () => {
+  it('slug troca "/" por "_", igual ao nome de arquivo do .uicomponent avulso', () => {
     expect(slugFor('Button/Primary')).toBe('Button_Primary')
     expect(slugFor('HUD/StatBar')).toBe('HUD_StatBar')
     expect(slugFor('Panel')).toBe('Panel')
   })
 
-  it('componentPath sempre cai em components/<slug>/kit.json', () => {
-    expect(componentPath('Button/Primary')).toBe('components/Button_Primary/kit.json')
-    expect(componentPath('Panel')).toBe('components/Panel/kit.json')
+  it('componentPath sempre cai em components/<slug>/component.json', () => {
+    expect(componentPath('Button/Primary')).toBe('components/Button_Primary/component.json')
+    expect(componentPath('Panel')).toBe('components/Panel/component.json')
   })
 
-  it('assetPath aninha o path de asset do .uikit avulso um nível a mais', () => {
+  it('assetPath aninha o path de asset do .uicomponent avulso um nível a mais', () => {
     expect(assetPath('Button/Primary', 'images/bg_default.png')).toBe(
       'components/Button_Primary/images/bg_default.png',
     )
@@ -44,8 +44,8 @@ describe('buildKitBatchManifest', () => {
       generatedAt: '2026-09-15T00:00:00.000Z',
       source,
       components: [
-        { canonicalName: 'Button/Primary', path: 'components/Button_Primary/kit.json' },
-        { canonicalName: 'Panel', path: 'components/Panel/kit.json' },
+        { canonicalName: 'Button/Primary', path: 'components/Button_Primary/component.json' },
+        { canonicalName: 'Panel', path: 'components/Panel/component.json' },
       ],
       skipped: [],
     })

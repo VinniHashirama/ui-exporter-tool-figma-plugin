@@ -6,10 +6,12 @@
  */
 
 /**
- * 1.1.0: bloco `kit` opcional, para o pacote de componente. Campo novo e opcional e MINOR
- * pela regra do contrato — um importador 1.0 le o pacote de tela normalmente.
+ * 2.0.0: o bloco `kit` do pacote de componente foi renomeado para `component` (e o pacote em
+ * si passou de `.uikit`/`kit.json` para `.uicomponent`/`component.json`, com `.uikitset` virando
+ * `.uikit` e `kitset.json` virando `kit.json`). Campo renomeado é MAJOR pela regra do
+ * contrato — um importador 1.x não reconhece mais o pacote.
  */
-export const SCHEMA_VERSION = '1.1.0'
+export const SCHEMA_VERSION = '2.0.0'
 export const PLUGIN_VERSION = '0.1.0'
 
 export type Color = string
@@ -192,10 +194,10 @@ export interface KitSlot {
 /**
  * Cabecalho do pacote de componente.
  *
- * Presente apenas em `kit.json`; um pacote de tela nao tem este bloco. E o que diz ao
+ * Presente apenas em `component.json`; um pacote de tela nao tem este bloco. E o que diz ao
  * importador que ele deve gerar um prefab de kit em vez de uma tela.
  */
-export interface Kit {
+export interface Component {
   canonicalName: string
   role: KitRole
   /**
@@ -215,7 +217,7 @@ export interface UIIR {
   schemaVersion: string
   source: Source
   canvas: Canvas
-  kit?: Kit
+  component?: Component
   tokens?: Tokens
   assets: Asset[]
   lint: Diagnostic[]

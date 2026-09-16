@@ -748,7 +748,7 @@
         <p class="section-title">Exportar tudo</p>
         <p class="prose">
           Empacota todo componente já criado nesta página num só arquivo
-          <strong>.uikitset</strong>, para a Unity atualizar o kit inteiro de uma vez e manter
+          <strong>.uikit</strong>, para a Unity atualizar o kit inteiro de uma vez e manter
           os componentes em sincronia entre si.
         </p>
       </main>
@@ -1639,7 +1639,7 @@
   kitBatchButton.addEventListener("click", () => {
     kitBatchButton.disabled = true;
     setKitBatchStatus("Exportando...", null);
-    send({ type: "export-kit-batch" });
+    send({ type: "export-kit" });
   });
   function setKitBatchStatus(message, kind) {
     kitBatchStatusEl.textContent = message;
@@ -1871,7 +1871,7 @@
         renderPalette(message.colors);
         setPaletteStatus("", null);
         break;
-      case "kit-batch-ready":
+      case "kit-ready":
         void deliverKitBatch(message.payload);
         break;
       case "failed":
@@ -2146,7 +2146,7 @@
   }
   async function deliverKitBatch(payload) {
     try {
-      const files = { "kitset.json": strToU8(payload.manifestJson) };
+      const files = { "kit.json": strToU8(payload.manifestJson) };
       for (const component of payload.components) {
         files[component.path] = strToU8(component.json);
       }

@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://arvore.io/schemas/uiir/1.1.0/uiir.schema.json",
+  "$id": "https://arvore.io/schemas/uiir/2.0.0/uiir.schema.json",
   "title": "UIIR — UI Intermediate Representation",
-  "description": "Representação neutra de uma UI. Única fronteira entre o plugin do Figma e o importador da Unity. Nenhum campo é específico de Figma ou de Unity. Descreve dois tipos de pacote: o de tela (`ui.json`, sem o bloco `kit`) e o de componente (`kit.json`, com ele).",
+  "description": "Representação neutra de uma UI. Única fronteira entre o plugin do Figma e o importador da Unity. Nenhum campo é específico de Figma ou de Unity. Descreve dois tipos de pacote: o de tela (`screen.json`, sem o bloco `component`) e o de componente (`component.json`, com ele).",
   "type": "object",
   "required": ["schemaVersion", "source", "canvas", "root"],
   "additionalProperties": false,
@@ -15,7 +15,7 @@
     },
     "source": { "$ref": "#/$defs/source" },
     "canvas": { "$ref": "#/$defs/canvas" },
-    "kit": { "$ref": "#/$defs/kit" },
+    "component": { "$ref": "#/$defs/component" },
     "tokens": { "$ref": "#/$defs/tokens" },
     "assets": {
       "description": "Imagens embarcadas no pacote. Referenciadas por assetId.",
@@ -59,8 +59,8 @@
       }
     },
 
-    "kit": {
-      "description": "Presente apenas no pacote de componente (`kit.json`). É o que diz ao importador para gerar um prefab do kit em vez de uma tela. Ausente = pacote de tela.",
+    "component": {
+      "description": "Presente apenas no pacote de componente (`component.json`). É o que diz ao importador para gerar um prefab do kit em vez de uma tela. Ausente = pacote de tela.",
       "type": "object",
       "required": ["canonicalName", "role", "slots"],
       "additionalProperties": false,

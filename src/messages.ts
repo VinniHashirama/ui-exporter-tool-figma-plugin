@@ -17,8 +17,8 @@ export type UiToSandbox =
   /** `name` vira a chave da cor nova, depois de normalizada. */
   | { type: 'add-color'; name: string; hex: string }
   | { type: 'remove-color'; key: string }
-  /** Exporta todo componente da página atual num só pacote `.uikitset`. */
-  | { type: 'export-kit-batch' }
+  /** Exporta todo componente da página atual num só pacote `.uikit`. */
+  | { type: 'export-kit' }
   | { type: 'select-node'; nodeId: string }
   | { type: 'close' }
 
@@ -56,7 +56,7 @@ export interface PackedAsset {
 export interface ExportPayload {
   fileName: string
   /**
-   * Nome da entrada JSON dentro do zip: `ui.json` numa tela, `kit.json` num componente.
+   * Nome da entrada JSON dentro do zip: `screen.json` numa tela, `component.json` num componente.
    *
    * E o discriminador do pacote. O importador da Unity decide por ele se monta uma tela ou
    * um prefab do kit, em vez de inferir pelo conteudo.
@@ -90,12 +90,12 @@ export interface PaletteEntry {
   exists: boolean
 }
 
-export interface KitBatchExportPayload {
-  /** `<nome-da-pagina>.uikitset`. */
+export interface KitExportPayload {
+  /** `<nome-da-pagina>.uikit`. */
   fileName: string
-  /** JSON já formatado do `kitset.json` que vai na raiz do zip. */
+  /** JSON já formatado do `kit.json` que vai na raiz do zip. */
   manifestJson: string
-  /** `path` já é `components/<slug>/kit.json`. */
+  /** `path` já é `components/<slug>/component.json`. */
   components: { path: string; json: string }[]
   /** `path` já inclui `components/<slug>/images/<arquivo>.png`. */
   assets: PackedAsset[]
@@ -108,6 +108,6 @@ export type SandboxToUi =
   | { type: 'export-ready'; payload: ExportPayload }
   | { type: 'kit-created'; summary: KitSummary }
   | { type: 'palette'; colors: PaletteEntry[] }
-  | { type: 'kit-batch-ready'; payload: KitBatchExportPayload }
+  | { type: 'kit-ready'; payload: KitExportPayload }
   | { type: 'busy'; label: string }
   | { type: 'failed'; message: string }

@@ -98,14 +98,14 @@ describe('validacao da selecao', () => {
   })
 })
 
-describe('cabecalho do kit', () => {
+describe('cabecalho do component', () => {
   it('exporta nome canonico, papel e tamanho de design', async () => {
     const result = await buildComponent([button()], options)
 
     expectSchemaValid(result.ir)
     expect(result.canonicalName).toBe('Button/Primary')
-    expect(result.ir!.kit!.canonicalName).toBe('Button/Primary')
-    expect(result.ir!.kit!.role).toBe('button')
+    expect(result.ir!.component!.canonicalName).toBe('Button/Primary')
+    expect(result.ir!.component!.role).toBe('button')
     expect(result.ir!.canvas).toEqual({ width: 320, height: 96 })
     expect(result.bag.hasErrors).toBe(false)
   })
@@ -123,13 +123,13 @@ describe('cabecalho do kit', () => {
 
     for (const [name, role] of cases) {
       const result = await buildComponent([button(name)], options)
-      expect(result.ir!.kit!.role, `'${name}' deveria inferir '${role}'`).toBe(role)
+      expect(result.ir!.component!.role, `'${name}' deveria inferir '${role}'`).toBe(role)
     }
   })
 
   it('o papel escolhido pelo designer ganha do palpite pelo nome', async () => {
     const result = await buildComponent([button('HUD/StatBar')], { ...options, role: 'button' })
-    expect(result.ir!.kit!.role).toBe('button')
+    expect(result.ir!.component!.role).toBe('button')
   })
 
   it('a raiz usa o nome canonico, nao o nome da variante', async () => {
@@ -142,9 +142,9 @@ describe('slots', () => {
   it('descobre slot pelo prefixo $ no nome da layer', async () => {
     const result = await buildComponent([button()], options)
 
-    expect(result.ir!.kit!.slots).toHaveLength(1)
-    expect(result.ir!.kit!.slots[0]!.name).toBe('label')
-    expect(result.ir!.kit!.slots[0]!.nodeId).toBeTruthy()
+    expect(result.ir!.component!.slots).toHaveLength(1)
+    expect(result.ir!.component!.slots[0]!.name).toBe('label')
+    expect(result.ir!.component!.slots[0]!.nodeId).toBeTruthy()
     expect(result.slotCount).toBe(1)
   })
 
@@ -164,7 +164,7 @@ describe('slots', () => {
 
     const result = await buildComponent([node], options)
 
-    expect(result.ir!.kit!.slots.map((slot) => slot.name)).toEqual(['label'])
+    expect(result.ir!.component!.slots.map((slot) => slot.name)).toEqual(['label'])
   })
 
   it('avisa quando o componente nao declara slot nenhum', async () => {
@@ -195,7 +195,7 @@ describe('slots', () => {
 
     const result = await buildComponent([node], options)
 
-    expect(result.ir!.kit!.slots).toHaveLength(1)
+    expect(result.ir!.component!.slots).toHaveLength(1)
     expect(rules(result.bag.all)).toContain(RULES.duplicateSlot)
   })
 })
@@ -221,11 +221,11 @@ describe('variantes', () => {
     const result = await buildComponent([set], options)
 
     expectSchemaValid(result.ir)
-    expect(result.ir!.kit!.canonicalName).toBe('Button/Primary')
+    expect(result.ir!.component!.canonicalName).toBe('Button/Primary')
     // Trava a variante de origem: exportar de outra depois trocaria todos os node ids de
     // uma vez e o importador recriaria o prefab inteiro.
-    expect(result.ir!.kit!.sourceVariantId).toBeTruthy()
-    expect(result.ir!.kit!.ignoredVariants).toHaveLength(3)
+    expect(result.ir!.component!.sourceVariantId).toBeTruthy()
+    expect(result.ir!.component!.ignoredVariants).toHaveLength(3)
     expect(rules(result.bag.all)).toContain(RULES.variantIgnored)
   })
 
@@ -247,7 +247,7 @@ describe('variantes', () => {
     const result = await buildComponent([set], options)
 
     expect(result.ir).not.toBeNull()
-    expect(result.ir!.kit!.ignoredVariants).toBeUndefined()
+    expect(result.ir!.component!.ignoredVariants).toBeUndefined()
   })
 })
 

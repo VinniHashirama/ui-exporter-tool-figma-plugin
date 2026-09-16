@@ -8,6 +8,6 @@
   "documentAccess": "dynamic-page",
   "networkAccess": {
     "allowedDomains": ["none"],
-    "reasoning": "O plugin nao faz nenhuma chamada de rede. O pacote .uiexport e gerado localmente e baixado pelo navegador."
+    "reasoning": "O plugin nao faz nenhuma chamada de rede. O pacote .uiscreen e gerado localmente e baixado pelo navegador."
   }
 }

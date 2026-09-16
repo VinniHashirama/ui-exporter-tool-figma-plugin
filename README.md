@@ -1,6 +1,6 @@
 # Arvore UI Exporter — plugin do Figma
 
-Exporta uma tela montada no Figma para um pacote `.uiexport`, que o
+Exporta uma tela montada no Figma para um pacote `.uiscreen`, que o
 [pacote da Unity](https://github.com/VinniHashirama/ui-exporter-tool-unity-package) importa e
 transforma em interface UGUI pronta.
 
@@ -127,7 +127,7 @@ delas pelo nome; cores próprias podem ser removidas.
 6. **Zere os erros.** Erro bloqueia o export; aviso passa. Clicar num item da lista leva a
    viewport até a layer.
 
-7. Clique em **`Exportar`**. O navegador baixa `NomeDaTela.uiexport`. Entregue esse arquivo ao
+7. Clique em **`Exportar`**. O navegador baixa `NomeDaTela.uiscreen`. Entregue esse arquivo ao
    programador.
 
 O alvo é exportar com **zero avisos**, não com poucos avisos.
@@ -154,16 +154,16 @@ A referência completa das convenções está em
 Modo **Exportação** → aba **Componente**. Selecione um `Component` ou `Component Set` (não
 precisa ter sido criado pelo kit — qualquer componente com nome canônico válido serve), confira
 os slots e os avisos, escolha o **papel na Unity** se o plugin não inferiu certo pelo nome, e
-clique em **`Exportar`**. Sai um pacote `<Nome>.uikit`, que o importador da Unity gera ou
+clique em **`Exportar`**. Sai um pacote `<Nome>.uicomponent`, que o importador da Unity gera ou
 atualiza como prefab em `Assets/UI/Generated/Kit`.
 
 ## 5. Exportar o kit completo
 
 Modo **Exportação** → aba **Kit completo**. Empacota **todo componente de primeiro nível** já
 criado na página atual — o kit inteiro, ou só os componentes próprios que você foi criando — num
-único arquivo `.uikitset`. Do lado da Unity, esse arquivo atualiza todos os prefabs do kit de uma
-vez, em vez de importar um `.uikit` por vez, o que é o jeito de manter a Unity em sincronia com o
-Figma depois de uma leva de ajustes visuais.
+único arquivo `.uikit`. Do lado da Unity, esse arquivo atualiza todos os prefabs do kit de uma
+vez, em vez de importar um `.uicomponent` por vez, o que é o jeito de manter a Unity em sincronia
+com o Figma depois de uma leva de ajustes visuais.
 
 Componente que falhar ao exportar (nome inválido, erro bloqueante) não trava os outros: ele
 aparece listado como ignorado no arquivo, e o resto do kit sai normalmente.
@@ -179,7 +179,7 @@ npm ci --ignore-scripts
 npm run build        # gera dist/code.js e dist/ui.html
 npm run watch        # rebuild a cada save; rode o plugin de novo no Figma para recarregar
 npm run check        # typecheck + testes + build
-npm run sample       # regenera samples/HomeMenu.uiexport
+npm run sample       # regenera samples/HomeMenu.uiscreen
 ```
 
 ### Por que `dist/` é commitado
@@ -209,7 +209,7 @@ iframe, e o iframe compacta com `fflate` e dispara o download.
 | `traverse.ts` | Percorre a árvore e monta o UIIR. O núcleo |
 | `kit-builder.ts` | Cria a biblioteca canônica dentro do Figma |
 | `palette.ts` | Lê/edita a paleta como Paint Styles `color/<chave>` do arquivo |
-| `kit-batch.ts` | Monta o manifesto `kitset.json` do export em lote (`.uikitset`), puro e testado |
+| `kit-batch.ts` | Monta o manifesto `kit.json` do export em lote (`.uikit`), puro e testado |
 | `naming.ts` | Convenções de nome (`_`, `@`, `#img`, `:loc`) e sanitização |
 | `kit.ts` | Vocabulário canônico do kit |
 | `diagnostics.ts` | Acumula o lint; erro bloqueia o export |
@@ -244,9 +244,9 @@ permite testar a travessia inteira fora do Figma. Os dois que mais importam:
 
 O **export de tela, o export de componente e a reorganização de abas (Criação/Exportação) foram
 validados manualmente no Figma real**. `loadPalette`/`upsertPaletteColor` (aba Cores) e o laço de
-`exportKitBatch` sobre `figma.currentPage` (`.uikitset`) dependem de Paint Style e de
+`exportKitBatch` sobre `figma.currentPage` (`.uikit`) dependem de Paint Style e de
 `buildComponent` de verdade — caros demais para simular em `figma-mock.ts` — e por isso só têm
-cobertura de teste na parte pura (`hexToRgb`/`rgbToHex`, montagem do `kitset.json`); a parte que
+cobertura de teste na parte pura (`hexToRgb`/`rgbToHex`, montagem do `kit.json`); a parte que
 toca a API do Figma foi validada manualmente, não por teste automatizado. Se você for o primeiro
 a notar algo estranho nelas, o
 [roadmap](https://github.com/VinniHashirama/ui-exporter-tool-docs-and-samples/blob/main/ROADMAP.md)
